@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from pathlib import Path
+
+from .config import DEFAULT_RESULTS_DIR
+from .detector import discover_projects
+from .models import ScanResult
+from .reporting.reports import generate_merged_report
+from .scanner import scan_project
+from .utils import ensure_dir, safe_name, write_json
+
+
+def make_run_dir(base_output_dir: Path) -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_dir = base_output_dir / timestamp
+    suffix = 1
+    while run_dir.exists():
+        suffix += 1
+        run_dir = base_output_dir / f"{timestamp}-{suffix}"
+    return ensure_dir(run_dir)
+
+
+def scan_all(
+    root: Path,
+    output_base: Path | None = None,
+    max_workers: int = 4,
+    recursive_depth: int = 3,
+    trivy_only: bool = False,
+    dry_run: bool = False,
+) -> tuple[Path, list[ScanResult], Path | None]:
+    root = root.resolve()
+    output_base = (output_base or (root / DEFAULT_RESULTS_DIR)).resolve()
+    ensure_dir(output_base)
+    run_dir = make_run_dir(output_base)
+    services_dir = ensure_dir(run_dir / "services")
+
+    projects = discover_projects(root, recursive_depth=recursive_depth)
+    if not projects:
+        summary = {
+            "root": str(root),
+            "run_dir": str(run_dir),
+            "status": "NO_PROJECTS",
+            "projects": [],
+        }
+        write_json(run_dir / "scan-summary.json", summary)
+        write_json(output_base / "scan-summary.json", summary)
+        return run_dir, [], None
+
+    results: list[ScanResult] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {}
+        for project in projects:
+            try:
+                relative_name = str(project.path.relative_to(root))
+            except ValueError:
+                relative_name = project.name
+            if relative_name == ".":
+                relative_name = project.name
+            service_dir = services_dir / safe_name(relative_name)
+            future = executor.submit(scan_project, project, service_dir, trivy_only, dry_run)
+            future_map[future] = project
+
+        for future in as_completed(future_map):
+            results.append(future.result())
+
+    results.sort(key=lambda r: r.name.lower())
+    merged_report: Path | None = None
+    if not dry_run and any(r.status == "OK" for r in results):
+        merged_report = generate_merged_report(services_dir, run_dir / "consolidated-report.html")
+        shutil.copy2(merged_report, output_base / "consolidated-report.html")
+
+    summary = {
+        "root": str(root),
+        "run_dir": str(run_dir),
+        "consolidated_report": str(merged_report) if merged_report else None,
+        "stable_consolidated_report": str(output_base / "consolidated-report.html") if merged_report else None,
+        "total_projects": len(results),
+        "ok": sum(1 for r in results if r.status == "OK"),
+        "failed": sum(1 for r in results if r.status == "FAIL"),
+        "dry_run": dry_run,
+        "projects": [r.to_json() for r in results],
+    }
+    write_json(run_dir / "scan-summary.json", summary)
+    write_json(output_base / "scan-summary.json", summary)
+    return run_dir, results, merged_report
