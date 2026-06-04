@@ -81,7 +81,7 @@ Bat buoc:
 
 Khuyen nghi de SBOM chinh xac hon theo tung ecosystem:
 
-- Maven project: `mvn`
+- Maven project: `mvnw.cmd`/`mvnw` trong project hoac `mvn` trong `PATH`
 - Gradle project: `gradlew` trong project hoac `gradle` trong `PATH`
 - Node.js project: `node`, `npm`, `npx`
 - .NET project: `dotnet`, tool se tu cai `dotnet-CycloneDX` neu thieu
@@ -121,7 +121,7 @@ Voi moi project/service:
 1. Detect loai source.
 2. Luon tao moi SBOM cho lan scan hien tai, khong dung lai SBOM co san trong source de tranh ket qua bi cu khi re-scan.
 3. Tao SBOM theo ecosystem neu co tool phu hop:
-   - Maven: `mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -DskipTests`
+   - Maven: `mvnw.cmd`/`mvnw` neu co, fallback `mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -DskipTests`
    - Gradle: `gradlew cyclonedxBom` hoac `gradle cyclonedxBom`; neu thieu plugin, tool dung init script tam de apply `org.cyclonedx.bom` version `2.3.1` theo document ma khong sua source.
    - Node.js npm lock: `npx --yes @cyclonedx/cyclonedx-npm --ignore-npm-errors --package-lock-only`
    - Node.js yarn/pnpm/bun lock: fallback `trivy fs`

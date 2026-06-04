@@ -58,13 +58,29 @@ def _run_trivy_fs(project: Project, output_sbom: Path, log_file: Path) -> tuple[
     return output_sbom, "generated-trivy-fs", [record]
 
 
-def _run_maven(project: Project, output_sbom: Path, log_file: Path) -> tuple[Path | None, list[CommandRecord]]:
+def _maven_command(project: Project) -> list[str] | None:
+    if os.name == "nt" and (project.path / "mvnw.cmd").is_file():
+        return [str(project.path / "mvnw.cmd")]
+    if (project.path / "mvnw").is_file():
+        mvnw = project.path / "mvnw"
+        try:
+            mode = mvnw.stat().st_mode
+            mvnw.chmod(mode | 0o111)
+        except OSError:
+            pass
+        return [str(mvnw)]
     mvn = first_existing_tool(("mvn", "mvn.cmd"))
-    if not mvn:
+    if mvn:
+        return [mvn]
+    return None
+
+
+def _run_maven(project: Project, output_sbom: Path, log_file: Path) -> tuple[Path | None, list[CommandRecord]]:
+    command = _maven_command(project)
+    if not command:
         return None, []
     started_at = time.time()
-    command = [
-        mvn,
+    command = command + [
         "org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom",
         "-DskipTests",
         "-DoutputFormat=json",
