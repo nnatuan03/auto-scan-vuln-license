@@ -25,14 +25,17 @@ def get_recommended_fix(fixed_versions_list):
             return (0,)
     return max(all_versions, key=version_key)
 
-def get_license_action(severity, category):
+def get_license_action(severity, category, license_name=""):
     category = (category or "").lower()
     severity = (severity or "").upper()
+    license_name = license_name or ""
     if severity in ("CRITICAL", "HIGH") or "restricted" in category or "forbidden" in category:
         return ("Replace", "#e53e3e")
     elif severity == "MEDIUM" or "reciprocal" in category:
         return ("Review", "#dd8500")
     elif severity == "LOW" or "notice" in category:
+        return ("Review", "#dd8500")
+    elif license_name.startswith("LicenseRef-") or severity == "UNKNOWN" or category in ("", "unknown"):
         return ("Review", "#dd8500")
     else:
         return ("OK", "#2d9e5f")
@@ -63,6 +66,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
 
     for result in results:
         target = result.get("Target", "")
+        result_class = result.get("Class", "")
         for v in result.get("Vulnerabilities") or []:
             vuln_rows.append({
                 "target": target,
@@ -75,9 +79,17 @@ def generate_html(report_path="report.json", output_path="report.html"):
                 "url": f"https://avd.aquasec.com/nvd/{v.get('VulnerabilityID','').lower()}"
             })
         for lic in result.get("Licenses") or []:
+            pkg_name = lic.get("PkgName") or lic.get("Package") or ""
+            if not pkg_name:
+                filepath = lic.get("FilePath", "") or ""
+                if filepath:
+                    parts = filepath.replace("\\", "/").split("/")
+                    pkg_name = parts[-2] if len(parts) >= 2 else parts[-1]
+                elif target and result_class == "license-file":
+                    pkg_name = "(file-based) " + target
             license_rows.append({
                 "target": target,
-                "pkg": lic.get("PkgName", ""),
+                "pkg": pkg_name or "(unknown)",
                 "license": lic.get("Name", ""),
                 "severity": lic.get("Severity", "UNKNOWN"),
                 "category": lic.get("Category", ""),
@@ -137,7 +149,11 @@ def generate_html(report_path="report.json", output_path="report.html"):
         highest = get_highest_severity(severities)
         license_names = list(dict.fromkeys(l["license"] for l in lics))
         categories = list(dict.fromkeys(l["category"] for l in lics if l["category"]))
-        action, action_color = get_license_action(highest, lics[0].get("category", ""))
+        action, action_color = get_license_action(
+            highest,
+            ",".join(categories),
+            ",".join(license_names),
+        )
         lic_groups.append({
             "pkg": pkg, "target": target,
             "highest_severity": highest,

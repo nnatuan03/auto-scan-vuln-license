@@ -64,6 +64,7 @@ Vai tro chinh:
 | `autoscan/sbom_generator.py` | Tao SBOM theo tung loai source, fallback ve `trivy fs`. |
 | `autoscan/license_normalizer.py` | Chuan hoa license SBOM ve SPDX/LicenseRef. |
 | `autoscan/license_rules.py` | Bo rule normalize license tu ten vendor/free-text ve SPDX ID. |
+| `autoscan/license_inventory.py` | Bu license tu SBOM vao report neu Trivy khong tra du license rows. |
 | `autoscan/trivy_runner.py` | Chay Trivy va tao output JSON/TXT. |
 | `autoscan/scanner.py` | Scan mot project/service. |
 | `autoscan/batch.py` | Scan nhieu project/service song song va tao report tong hop. |
@@ -133,10 +134,11 @@ Voi moi project/service:
    - `license.json`: license-only JSON
    - `license.txt`: license-only TXT
    - `vuln.json`: vulnerability-only JSON
-6. Sinh:
+6. Doi chieu license trong `SBOM.cdx-fix.json` voi `report.json`/`license.json`; neu Trivy tra thieu package license, tool tu bo sung tu SBOM. Component khong khai bao license se hien `LicenseRef-No-Declared-License` de khong bi mat im lang.
+7. Sinh:
    - `report.html`
    - `report-vuln.html`
-7. Merge tat ca service thanh `consolidated-report.html`.
+8. Merge tat ca service thanh `consolidated-report.html`.
 
 ## Output
 
@@ -174,6 +176,7 @@ File quan trong nhat:
 - `scan-results\consolidated-report.html`: report tong hop cuoi cung.
 - `scan-results\scan-summary.json`: summary may-doc-duoc, gom OK/FAIL, count vuln/license, path output tung service.
 - `services\<service>\scan.log`: log command chi tiet de debug.
+- `services\<service>\license-normalize.log`: thong ke so component co license trong SBOM va cac license da normalize.
 
 ## Tuy chon CLI
 
@@ -257,6 +260,15 @@ Kiem tra cac diem sau:
 - Neu app frontend nam qua sau hon 5 cap folder, tang `--recursive-depth`.
 - Neu dung npm va co `package-lock.json`, tool se dung `--package-lock-only`, nen khong can `node_modules`.
 - Neu terminal/CI set `NODE_ENV=production`, Node SBOM generator van duoc chay voi `NODE_ENV` unset de khong tu omit `devDependencies`.
+
+### License scan thieu package
+
+Kiem tra theo thu tu:
+
+- Mo `services\<service>\license-normalize.log`: dong `Components total` va `Components with licenses` cho biet SBOM co bao nhieu component/license.
+- Neu SBOM co license nhung Trivy khong tra het trong `license.json`, tool se tu them cac dong thieu tu `SBOM.cdx-fix.json` vao `report.json` va `license.json`.
+- Neu component khong co license trong SBOM, report se hien `LicenseRef-No-Declared-License` voi severity `UNKNOWN` de reviewer xu ly thu cong.
+- Neu `Components total` da thieu package, nguyen nhan nam o buoc tao SBOM/generator cua ecosystem, khong phai report.
 
 ### `trivy not found in PATH`
 
