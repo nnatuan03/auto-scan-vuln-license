@@ -62,9 +62,9 @@ DOCUMENT_COVERAGE: list[dict[str, str]] = [
     {
         "case": "License JSON and TXT outputs",
         "document": "trivy sbom --scanners license -o c4t.txt and -f json -o c4t.json.",
-        "implementation": "Generates license.txt and license.json for every successful service scan.",
+        "implementation": "Runs one combined Trivy scan, then derives license.txt and license.json from report.json for every successful service scan.",
         "status": "COVERED",
-        "difference": "File names are standardized per service output folder.",
+        "difference": "File names are standardized per service output folder; fewer Trivy commands are used for speed.",
     },
     {
         "case": "Missing license rows from Trivy",
@@ -260,6 +260,8 @@ def _service_debug(result: ScanResult) -> dict[str, Any]:
                 "cwd": record.cwd,
                 "returncode": record.returncode,
                 "duration_seconds": record.duration_seconds,
+                "stdout_tail": record.stdout_tail,
+                "stderr_tail": record.stderr_tail,
             }
             for record in result.commands
         ],
@@ -399,6 +401,28 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
                     f"`{item.get('from')}` -> `{item.get('to')}` "
                     f"from `{item.get('source')}`"
                 )
+        failed_commands = [
+            command for command in service["commands"]
+            if command["returncode"] != 0
+        ]
+        successful_commands = [
+            command for command in service["commands"]
+            if command["returncode"] == 0
+        ]
+        if failed_commands and successful_commands:
+            first_failed = failed_commands[0]
+            first_success = successful_commands[0]
+            lines.append(
+                "- Retry/fallback note: "
+                f"`{first_failed['command_text']}` exited `{first_failed['returncode']}`, "
+                f"then `{first_success['command_text']}` succeeded"
+            )
+        if failed_commands:
+            lines.extend(["", "Command failures:", ""])
+            for command in failed_commands[:5]:
+                lines.append(f"- `[exit {command['returncode']}]` `{command['command_text']}`")
+                for line in (command.get("stderr_tail") or [])[-5:]:
+                    lines.append(f"  - `{line}`")
         if service["errors"]:
             lines.append(f"- Errors: `{'; '.join(service['errors'])}`")
 

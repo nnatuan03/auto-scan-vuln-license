@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from .models import Project, ScanResult
+from .terminal import colorize, print_lines, status_label
 
 
 def _format_duration(seconds: float | None) -> str:
@@ -88,29 +89,38 @@ class ProgressDashboard:
         percent = self.completed / self.total * 100.0 if self.total else 0.0
         running = max(0, self.total - self.completed)
 
-        print("", file=self.stream)
-        print("Auto Scan Dashboard", file=self.stream)
-        print("===================", file=self.stream)
-        print(f"Stage    : {self.current_stage}", file=self.stream)
+        lines = [
+            "",
+            colorize("Auto Scan Dashboard", "bold", stream=self.stream),
+            "===================",
+        ]
+        stage_color = "green" if self.current_stage == "finished" else "cyan"
+        lines.append(f"Stage    : {colorize(self.current_stage, stage_color, stream=self.stream)}")
         if self.root:
-            print(f"Root     : {self.root}", file=self.stream)
+            lines.append(f"Root     : {self.root}")
         if self.run_dir:
-            print(f"Run dir  : {self.run_dir}", file=self.stream)
-        print(f"Progress : [{_progress_bar(percent)}] {self.completed}/{self.total} ({percent:5.1f}%)", file=self.stream)
-        print(f"Status   : DONE={self.completed} OK={self.ok} FAIL={self.failed} RUNNING={running}", file=self.stream)
-        print(f"Elapsed  : {_format_duration(elapsed)}", file=self.stream)
-        print(f"ETA      : {_format_duration(self._eta_seconds())}", file=self.stream)
+            lines.append(f"Run dir  : {self.run_dir}")
+        bar = _progress_bar(percent)
+        lines.append(f"Progress : [{colorize(bar, 'blue', stream=self.stream)}] {self.completed}/{self.total} ({percent:5.1f}%)")
+        lines.append(
+            "Status   : "
+            f"DONE={self.completed} "
+            f"OK={colorize(str(self.ok), 'green', stream=self.stream)} "
+            f"FAIL={colorize(str(self.failed), 'red', stream=self.stream)} "
+            f"RUNNING={colorize(str(running), 'yellow', stream=self.stream)}"
+        )
+        lines.append(f"Elapsed  : {_format_duration(elapsed)}")
+        lines.append(f"ETA      : {_format_duration(self._eta_seconds())}")
         if projects:
             kinds = ", ".join(sorted({project.kind for project in projects}))
-            print(f"Detected : {len(projects)} project(s) [{kinds or '-'}]", file=self.stream)
+            lines.append(f"Detected : {len(projects)} project(s) [{kinds or '-'}]")
         if result:
-            print(
+            lines.append(
                 "Last     : "
-                f"[{result.status}] {result.name} "
+                f"[{status_label(result.status)}] {result.name} "
                 f"kind={result.project_kind} "
                 f"sbom={result.sbom_status} "
                 f"vulns={result.vuln_count} "
-                f"licenses={result.license_count}",
-                file=self.stream,
+                f"licenses={result.license_count}"
             )
-        self.stream.flush()
+        print_lines(lines, stream=self.stream)

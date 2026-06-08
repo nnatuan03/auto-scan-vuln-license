@@ -24,6 +24,8 @@ class CommandRecord:
     cwd: str
     returncode: int
     duration_seconds: float
+    stdout_tail: list[str] = field(default_factory=list)
+    stderr_tail: list[str] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)

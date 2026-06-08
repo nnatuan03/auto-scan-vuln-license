@@ -33,6 +33,13 @@ ETA      : 03:20
 ```
 
 Dashboard cap nhat sau moi service hoan tat va khi bat dau merge report.
+Moi command ngoai nhu Maven, Gradle, npm/npx, Flutter, Trivy se duoc in ra terminal voi mau rieng:
+
+```text
+[RUN] trivy sbom --scanners vuln,license --format json ...
+[OK ] exit=0 time=1.24s trivy sbom --scanners vuln,license --format json ...
+[FAIL] exit=1 time=0.42s gradle cyclonedxBom
+```
 
 Ket qua cuoi cung:
 
@@ -63,6 +70,7 @@ auto-scan-vuln-lic/
     progress.py
     scanner.py
     sbom_generator.py
+    terminal.py
     trivy_runner.py
     utils.py
     reporting/
@@ -88,6 +96,7 @@ Vai tro chinh:
 | `autoscan/batch.py` | Scan nhieu project/service song song va tao report tong hop. |
 | `autoscan/debug_report.py` | Tao debug report de doi chieu document, detect marker, command, SBOM/license count. |
 | `autoscan/progress.py` | Dashboard terminal hien tien do %, elapsed va ETA trong luc scan. |
+| `autoscan/terminal.py` | In command, status va mau terminal/PowerShell. |
 | `autoscan/reporting/single_report.py` | Engine sinh report HTML tung service. |
 | `autoscan/reporting/merge_report.py` | Engine sinh report HTML tong hop. |
 
@@ -151,11 +160,10 @@ Voi moi project/service:
    - Neu generator rieng fail hoac khong tao ra SBOM moi, fallback `trivy fs --format cyclonedx`.
 4. Reconcile version trong SBOM voi version moi nhat tim duoc trong source/lock file hien co. Vi du Node co ca `package-lock.json` va `yarn.lock`, neu SBOM ra `1.80.0` nhung `package.json`/`yarn.lock` dang co `1.84.0`, tool se cap nhat SBOM len `1.84.0` truoc khi scan. Tool khong tu query registry de upgrade dependency ngoai source.
 5. Normalize license thanh `SBOM.cdx-fix.json`.
-6. Chay Trivy:
-   - `report.json`: scan chung `vuln,license`
-   - `license.json`: license-only JSON
-   - `license.txt`: license-only TXT
-   - `vuln.json`: vulnerability-only JSON
+6. Chay Trivy nhanh:
+   - Tool chi chay 1 lenh `trivy sbom --scanners vuln,license --format json` de tao `report.json`
+   - Tu `report.json`, tool tach ra `license.json`, `license.txt`, va `vuln.json`
+   - Cach nay giu du output nhu cu nhung giam so lan goi Trivy tren moi service
 7. Doi chieu license trong `SBOM.cdx-fix.json` voi `report.json`/`license.json`; neu Trivy tra thieu package license, tool tu bo sung tu SBOM. Component khong khai bao license se hien `LicenseRef-No-Declared-License` de khong bi mat im lang.
 8. Sinh:
    - `report.html`
@@ -247,6 +255,7 @@ Trong file debug, kiem tra theo thu tu:
 - `Document Coverage`: case nao dang covered, case nao khac document co chu dich, case nao excluded.
 - `Services`: service nao duoc detect, kind gi, marker nao, SBOM tao bang generator nao.
 - `Commands`: command thuc te da chay va exit code.
+- `Retry/fallback note` va `Command failures`: command fail/success tiep theo, kem stderr tail, dung de xem ly do fallback.
 - `Version updates`: so component trong SBOM duoc nang len version moi hon tim thay trong source/lock file.
 - `fixed components`: so component trong `SBOM.cdx-fix.json`; neu so nay da thieu thi loi nam o buoc tao SBOM.
 - `SBOM license rows` va `Trivy licenses`: neu SBOM co du license rows nhung Trivy thieu, tool se backfill vao report.
@@ -273,6 +282,10 @@ python autoscan.py "D:\Projects" --dry-run
 python autoscan.py "D:\Projects" --no-dashboard
 ```
 
+```powershell
+python autoscan.py "D:\Projects" --hide-commands --no-color
+```
+
 Y nghia:
 
 | Option | Cong dung |
@@ -283,6 +296,8 @@ Y nghia:
 | `--dry-run` | Chi detect project, khong chay Trivy hay tool ngoai. |
 | `--output` | Doi folder output mac dinh. |
 | `--no-dashboard` | Tat dashboard tien do trong terminal neu muon log gon. |
+| `--hide-commands` | Khong in tung command ra terminal. |
+| `--no-color` | Tat mau terminal. |
 
 PowerShell wrapper co option tuong ung:
 
@@ -291,6 +306,7 @@ PowerShell wrapper co option tuong ung:
 .\run_scan.ps1 -Path "D:\Projects" -TrivyOnly
 .\run_scan.ps1 -Path "D:\Projects" -DryRun
 .\run_scan.ps1 -Path "D:\Projects" -NoDashboard
+.\run_scan.ps1 -Path "D:\Projects" -HideCommands -NoColor
 ```
 
 ## Su dung report

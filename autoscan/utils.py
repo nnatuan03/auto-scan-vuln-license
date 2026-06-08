@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 from .models import CommandRecord
+from .terminal import command_finished, command_started
 
 
 def safe_name(value: str) -> str:
@@ -44,6 +45,7 @@ def run_command(
     stdout = ""
     stderr = ""
     returncode = 1
+    command_started(command, cwd)
     try:
         completed = subprocess.run(
             command,
@@ -72,7 +74,10 @@ def run_command(
         cwd=str(cwd),
         returncode=returncode,
         duration_seconds=round(duration, 3),
+        stdout_tail=_tail_lines(stdout),
+        stderr_tail=_tail_lines(stderr),
     )
+    command_finished(record)
 
     if log_file:
         with log_file.open("a", encoding="utf-8") as fh:
@@ -91,6 +96,16 @@ def run_command(
                     fh.write("\n")
 
     return record, stdout, stderr
+
+
+def _tail_lines(value: str, max_lines: int = 20, max_chars: int = 4000) -> list[str]:
+    if not value:
+        return []
+    lines = value.splitlines()[-max_lines:]
+    joined = "\n".join(lines)
+    if len(joined) <= max_chars:
+        return lines
+    return joined[-max_chars:].splitlines()
 
 
 def load_json(path: Path) -> dict:

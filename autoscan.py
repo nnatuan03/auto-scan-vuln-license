@@ -7,6 +7,7 @@ from pathlib import Path
 from autoscan.batch import scan_all
 from autoscan.config import DEFAULT_MAX_WORKERS, DEFAULT_RECURSIVE_DEPTH
 from autoscan.progress import ProgressDashboard
+from autoscan.terminal import configure_terminal, status_label
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -20,6 +21,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trivy-only", action="store_true", help="Skip ecosystem-specific SBOM generators and use trivy fs only.")
     parser.add_argument("--dry-run", action="store_true", help="Only detect projects; do not run external scan commands.")
     parser.add_argument("--no-dashboard", action="store_true", help="Disable the console progress dashboard.")
+    parser.add_argument("--hide-commands", action="store_true", help="Do not print each external command to the terminal.")
+    parser.add_argument("--no-color", action="store_true", help="Disable colored terminal output.")
     return parser
 
 
@@ -31,6 +34,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     output = Path(args.output).expanduser().resolve() if args.output else None
+    configure_terminal(
+        show_commands=not args.hide_commands,
+        color_mode="never" if args.no_color else "auto",
+    )
     dashboard = ProgressDashboard(enabled=not args.no_dashboard)
     run_dir, results, merged = scan_all(
         root=root,
@@ -69,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     for result in results:
         status = result.status
         details = f"{result.name} [{result.project_kind}] vulns={result.vuln_count} licenses={result.license_count} sbom={result.sbom_status}"
-        print(f"[{status}] {details}")
+        print(f"[{status_label(status)}] {details}")
         for err in result.errors:
             print(f"       error: {err}")
 

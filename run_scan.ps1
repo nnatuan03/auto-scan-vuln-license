@@ -5,7 +5,9 @@ param(
     [int]$RecursiveDepth = 5,
     [switch]$TrivyOnly,
     [switch]$DryRun,
-    [switch]$NoDashboard
+    [switch]$NoDashboard,
+    [switch]$HideCommands,
+    [switch]$NoColor
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,6 +46,12 @@ if ($DryRun) {
 }
 if ($NoDashboard) {
     $argsList += "--no-dashboard"
+}
+if ($HideCommands) {
+    $argsList += "--hide-commands"
+}
+if ($NoColor) {
+    $argsList += "--no-color"
 }
 
 & $pythonCmd.Source @argsList
