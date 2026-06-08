@@ -9,7 +9,7 @@ from typing import Any, Callable
 from .config import DEFAULT_RESULTS_DIR
 from .debug_report import write_debug_reports
 from .detector import discover_projects
-from .models import ScanResult
+from .models import Project, ScanResult
 from .reporting.reports import generate_merged_report
 from .scanner import scan_project
 from .utils import ensure_dir, safe_name, write_json
@@ -74,6 +74,9 @@ def scan_all(
         return run_dir, [], None
 
     results: list[ScanResult] = []
+    name_counts: dict[str, int] = {}
+    for project in projects:
+        name_counts[project.name] = name_counts.get(project.name, 0) + 1
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_map = {}
         for project in projects:
@@ -84,7 +87,15 @@ def scan_all(
             if relative_name == ".":
                 relative_name = project.name
             service_dir = services_dir / safe_name(relative_name)
-            future = executor.submit(scan_project, project, service_dir, trivy_only, dry_run)
+            scan_project_input = project
+            if name_counts.get(project.name, 0) > 1:
+                scan_project_input = Project(
+                    path=project.path,
+                    name=relative_name.replace("\\", "/"),
+                    kind=project.kind,
+                    markers=project.markers,
+                )
+            future = executor.submit(scan_project, scan_project_input, service_dir, trivy_only, dry_run)
             future_map[future] = project
 
         for future in as_completed(future_map):
