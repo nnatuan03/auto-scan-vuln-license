@@ -14,6 +14,8 @@ from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
 
+from autoscan.package_names import resolve_package_name
+
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
 
 
@@ -73,10 +75,17 @@ def load_all_reports(be_dir):
             continue
 
         for result in data.get("Results", []):
+            result_target = result.get("Target", "")
+            result_class  = result.get("Class", "")
             for v in result.get("Vulnerabilities") or []:
+                pkg_name = resolve_package_name(
+                    v,
+                    result_target=result_target,
+                    result_class=result_class,
+                ).name
                 vuln_rows.append({
                     "folder":  folder_name,
-                    "pkg":     v.get("PkgName", ""),
+                    "pkg":     pkg_name,
                     "version": v.get("InstalledVersion", ""),
                     "fixed":   v.get("FixedVersion", "-"),
                     "cve":     v.get("VulnerabilityID", ""),
@@ -85,27 +94,16 @@ def load_all_reports(be_dir):
                     "url":     "https://avd.aquasec.com/nvd/{0}".format(v.get("VulnerabilityID","").lower()),
                 })
             # Result type can be "lang-pkgs" (with package), "license-file" (file-based), or "config-license"
-            result_target = result.get("Target", "")
-            result_class  = result.get("Class", "")
             for lc in result.get("Licenses") or []:
-                # Try multiple field names for package
-                pkg_name = lc.get("PkgName") or lc.get("Package") or ""
-                # If still empty, derive from FilePath or Target
-                if not pkg_name:
-                    fp = lc.get("FilePath", "") or ""
-                    if fp:
-                        # e.g. "licenses/jackson-core/LICENSE" -> "jackson-core"
-                        parts = fp.replace("\\", "/").split("/")
-                        if len(parts) >= 2:
-                            pkg_name = parts[-2]
-                        else:
-                            pkg_name = parts[-1]
-                    elif result_target and result_class == "license-file":
-                        pkg_name = "(file-based) " + result_target
+                pkg_name = resolve_package_name(
+                    lc,
+                    result_target=result_target,
+                    result_class=result_class,
+                ).name
 
                 lic_rows.append({
                     "folder":   folder_name,
-                    "pkg":      pkg_name or "(unknown)",
+                    "pkg":      pkg_name,
                     "license":  lc.get("Name", ""),
                     "severity": lc.get("Severity", "UNKNOWN"),
                     "category": lc.get("Category", ""),

@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .package_names import UNKNOWN_PACKAGE, resolve_package_name
+
 
 PERMISSIVE = {
     "0BSD",
@@ -68,7 +70,12 @@ def _component_name(component: dict[str, Any]) -> str:
     bom_ref = str(component.get("bom-ref") or "").strip()
     if group and name and not name.startswith(group):
         return f"{group}/{name}"
-    return name or purl or bom_ref or "(unknown)"
+    if name:
+        return name
+    resolved = resolve_package_name(component, result_target=purl or bom_ref)
+    if resolved.name != UNKNOWN_PACKAGE:
+        return resolved.name
+    return purl or bom_ref or UNKNOWN_PACKAGE
 
 
 def _component_target(component: dict[str, Any]) -> str:

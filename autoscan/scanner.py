@@ -60,7 +60,7 @@ def scan_project(project: Project | Path, output_dir: Path, trivy_only: bool = F
         result.debug["license_normalize_stats"] = normalize_stats
         result.debug["fixed_sbom_path"] = str(fixed_sbom)
 
-        outputs, vuln_count, license_count, trivy_commands = scan_sbom(fixed_sbom, output_dir, log_file)
+        outputs, vuln_count, license_count, trivy_commands, package_name_stats = scan_sbom(fixed_sbom, output_dir, log_file)
         result.commands.extend(trivy_commands)
         result.report_json = outputs["report_json"]
         result.license_json = outputs["license_json"]
@@ -69,6 +69,7 @@ def scan_project(project: Project | Path, output_dir: Path, trivy_only: bool = F
         result.vuln_count = vuln_count
         result.license_count = license_count
         result.debug["trivy_outputs"] = {key: str(path) for key, path in outputs.items()}
+        result.debug["package_name_resolution"] = package_name_stats
 
         result.report_html = generate_single_report(result.report_json, output_dir / "report.html")
         result.vuln_html = generate_single_report(result.vuln_json, output_dir / "report-vuln.html")

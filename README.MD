@@ -67,6 +67,7 @@ auto-scan-vuln-lic/
     license_normalizer.py
     license_rules.py
     models.py
+    package_names.py
     progress.py
     scanner.py
     sbom_generator.py
@@ -91,6 +92,7 @@ Vai tro chinh:
 | `autoscan/license_normalizer.py` | Chuan hoa license SBOM ve SPDX/LicenseRef. |
 | `autoscan/license_rules.py` | Bo rule normalize license tu ten vendor/free-text ve SPDX ID. |
 | `autoscan/license_inventory.py` | Bu license tu SBOM vao report neu Trivy khong tra du license rows. |
+| `autoscan/package_names.py` | Recover package name bi thieu tu PURL, PkgID, node_modules path, license file path, Target. |
 | `autoscan/trivy_runner.py` | Chay Trivy va tao output JSON/TXT. |
 | `autoscan/scanner.py` | Scan mot project/service. |
 | `autoscan/batch.py` | Scan nhieu project/service song song va tao report tong hop. |
@@ -256,6 +258,7 @@ Trong file debug, kiem tra theo thu tu:
 - `Services`: service nao duoc detect, kind gi, marker nao, SBOM tao bang generator nao.
 - `Commands`: command thuc te da chay va exit code.
 - `Retry/fallback note` va `Command failures`: command fail/success tiep theo, kem stderr tail, dung de xem ly do fallback.
+- `Pkg name recovery`: so dong report goc thieu package name, so dong tool recover duoc, so dong van unknown.
 - `Version updates`: so component trong SBOM duoc nang len version moi hon tim thay trong source/lock file.
 - `fixed components`: so component trong `SBOM.cdx-fix.json`; neu so nay da thieu thi loi nam o buoc tao SBOM.
 - `SBOM license rows` va `Trivy licenses`: neu SBOM co du license rows nhung Trivy thieu, tool se backfill vao report.

@@ -6,6 +6,7 @@ from typing import Any
 
 from .license_inventory import augment_report_with_sbom_licenses
 from .models import CommandRecord
+from .package_names import annotate_report_package_names
 from .utils import count_trivy_findings, load_json, run_command, tool_exists, write_json
 
 
@@ -75,7 +76,7 @@ def _derive_split_outputs(outputs: dict[str, Path]) -> None:
     _write_license_table(_license_only_report(data), outputs["license_txt"])
 
 
-def scan_sbom(sbom_path: Path, output_dir: Path, log_file: Path) -> tuple[dict[str, Path], int, int, list[CommandRecord]]:
+def scan_sbom(sbom_path: Path, output_dir: Path, log_file: Path) -> tuple[dict[str, Path], int, int, list[CommandRecord], dict[str, Any]]:
     if not tool_exists("trivy"):
         raise TrivyScanError("trivy not found in PATH")
 
@@ -93,14 +94,24 @@ def scan_sbom(sbom_path: Path, output_dir: Path, log_file: Path) -> tuple[dict[s
     ], output_dir, log_file, outputs["report_json"]))
 
     added_to_report = augment_report_with_sbom_licenses(outputs["report_json"], sbom_path)
+    report_data = load_json(outputs["report_json"])
+    package_name_stats = annotate_report_package_names(report_data)
+    write_json(outputs["report_json"], report_data)
     _derive_split_outputs(outputs)
     if log_file:
         with log_file.open("a", encoding="utf-8") as fh:
             fh.write(
                 "\n[license-inventory]\n"
                 f"Added {added_to_report} SBOM license rows to report.json\n"
+                "\n[package-name-resolution]\n"
+                f"Vulnerabilities raw missing: {package_name_stats['vulnerabilities']['raw_missing']}, "
+                f"resolved: {package_name_stats['vulnerabilities']['resolved_from_fallback']}, "
+                f"unresolved: {package_name_stats['vulnerabilities']['unresolved']}\n"
+                f"Licenses raw missing: {package_name_stats['licenses']['raw_missing']}, "
+                f"resolved: {package_name_stats['licenses']['resolved_from_fallback']}, "
+                f"unresolved: {package_name_stats['licenses']['unresolved']}\n"
                 "Derived license.json, vuln.json, and license.txt from report.json for faster scans\n"
             )
 
     vuln_count, license_count = count_trivy_findings(outputs["report_json"])
-    return outputs, vuln_count, license_count, records
+    return outputs, vuln_count, license_count, records, package_name_stats

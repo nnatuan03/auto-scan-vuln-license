@@ -74,6 +74,13 @@ DOCUMENT_COVERAGE: list[dict[str, str]] = [
         "difference": "Adds LicenseRef-No-Declared-License for components that declare no license.",
     },
     {
+        "case": "Missing package name in report rows",
+        "document": "Review license/vulnerability report by package.",
+        "implementation": "Recovers missing PkgName from Package, PURL, PkgIdentifier, PkgID, node_modules path, license file path, or Target before rendering HTML/Excel.",
+        "status": "COVERED_PLUS",
+        "difference": "Debug report shows how many rows were missing raw names and which fallback source recovered them.",
+    },
+    {
         "case": "Script CI/CD/Jenkins license scan and email",
         "document": "Scripts scan SBOMs under third-party/sbom-reports and send result via email.",
         "implementation": "Not implemented in this local runner.",
@@ -219,6 +226,20 @@ def _top_level_lock_files(project_path: Path) -> list[str]:
     return [name for name in names if (project_path / name).is_file()]
 
 
+def _package_resolution_counts(stats: dict[str, Any] | None) -> str:
+    if not stats:
+        return "-"
+    parts = []
+    for label, key in (("vuln", "vulnerabilities"), ("lic", "licenses")):
+        item = stats.get(key) or {}
+        parts.append(
+            f"{label}: missing {item.get('raw_missing', 0)}, "
+            f"resolved {item.get('resolved_from_fallback', 0)}, "
+            f"unknown {item.get('unresolved', 0)}"
+        )
+    return "; ".join(parts)
+
+
 def _service_debug(result: ScanResult) -> dict[str, Any]:
     scan_log = result.output_dir / "scan.log"
     normalize_log = result.output_dir / "license-normalize.log"
@@ -268,6 +289,7 @@ def _service_debug(result: ScanResult) -> dict[str, Any]:
         "notes": result.notes,
         "errors": result.errors,
         "internal_debug": result.debug,
+        "package_name_resolution": result.debug.get("package_name_resolution") or {},
         "scan_log_tail": _tail_lines(scan_log),
         "license_normalize_log_tail": _tail_lines(normalize_log),
     }
@@ -358,7 +380,7 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
         "",
     ])
     lines.extend(_markdown_table(
-        ["Service", "Kind", "Status", "SBOM", "Fixed components", "Version updates", "SBOM license rows", "Trivy licenses", "Markers"],
+        ["Service", "Kind", "Status", "SBOM", "Fixed components", "Version updates", "SBOM license rows", "Trivy licenses", "Pkg name recovery", "Markers"],
         [
             [
                 service["name"],
@@ -369,6 +391,7 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
                 (service["internal_debug"].get("version_reconcile_stats") or {}).get("updated_components", "-"),
                 service["counts"].get("license_rows_from_fixed_sbom", "-"),
                 service["counts"]["report_json"].get("licenses", "-"),
+                _package_resolution_counts(service.get("package_name_resolution")),
                 ", ".join(service["markers"]) or "-",
             ]
             for service in data["services"]
@@ -401,6 +424,18 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
                     f"`{item.get('from')}` -> `{item.get('to')}` "
                     f"from `{item.get('source')}`"
                 )
+        package_name_stats = service.get("package_name_resolution") or {}
+        if package_name_stats:
+            lines.append(f"- Package name recovery: {_package_resolution_counts(package_name_stats)}")
+            for label, key in (("Vulnerability", "vulnerabilities"), ("License", "licenses")):
+                samples = (package_name_stats.get(key) or {}).get("samples") or []
+                for sample in samples[:5]:
+                    fields = sample.get("fields") or {}
+                    lines.append(
+                        f"  - {label} sample: resolved `{sample.get('resolved')}` "
+                        f"from `{sample.get('source')}`; target `{sample.get('target') or '-'}`; "
+                        f"fields `{fields}`"
+                    )
         failed_commands = [
             command for command in service["commands"]
             if command["returncode"] != 0
@@ -448,7 +483,8 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
         "1. If `fixed components` is lower than expected, inspect the SBOM generation command and `scan.log`.",
         "2. If `fixed components` is correct but `Trivy licenses` is lower, check the SBOM backfill section in `scan.log`.",
         "3. If a Node.js frontend is missing transitive packages, check lock files in the service row and commit the correct lock file.",
-        "4. Use `--dry-run` to confirm every service folder is detected before running the full scan.",
+        "4. If `Pkg name recovery` has `unknown > 0`, inspect the listed sample fields in this debug report and the matching `report.json` row.",
+        "5. Use `--dry-run` to confirm every service folder is detected before running the full scan.",
         "",
     ])
     return "\n".join(lines)

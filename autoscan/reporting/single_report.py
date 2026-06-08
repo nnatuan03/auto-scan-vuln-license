@@ -4,6 +4,8 @@ from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
 
+from autoscan.package_names import resolve_package_name
+
 def get_highest_severity(severities):
     SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
     return min(severities, key=lambda s: SEVERITY_ORDER.get(s, 99))
@@ -68,9 +70,14 @@ def generate_html(report_path="report.json", output_path="report.html"):
         target = result.get("Target", "")
         result_class = result.get("Class", "")
         for v in result.get("Vulnerabilities") or []:
+            pkg_name = resolve_package_name(
+                v,
+                result_target=target,
+                result_class=result_class,
+            ).name
             vuln_rows.append({
                 "target": target,
-                "pkg": v.get("PkgName", ""),
+                "pkg": pkg_name,
                 "version": v.get("InstalledVersion", ""),
                 "fixed": v.get("FixedVersion", "-"),
                 "cve": v.get("VulnerabilityID", ""),
@@ -79,17 +86,14 @@ def generate_html(report_path="report.json", output_path="report.html"):
                 "url": f"https://avd.aquasec.com/nvd/{v.get('VulnerabilityID','').lower()}"
             })
         for lic in result.get("Licenses") or []:
-            pkg_name = lic.get("PkgName") or lic.get("Package") or ""
-            if not pkg_name:
-                filepath = lic.get("FilePath", "") or ""
-                if filepath:
-                    parts = filepath.replace("\\", "/").split("/")
-                    pkg_name = parts[-2] if len(parts) >= 2 else parts[-1]
-                elif target and result_class == "license-file":
-                    pkg_name = "(file-based) " + target
+            pkg_name = resolve_package_name(
+                lic,
+                result_target=target,
+                result_class=result_class,
+            ).name
             license_rows.append({
                 "target": target,
-                "pkg": pkg_name or "(unknown)",
+                "pkg": pkg_name,
                 "license": lic.get("Name", ""),
                 "severity": lic.get("Severity", "UNKNOWN"),
                 "category": lic.get("Category", ""),
