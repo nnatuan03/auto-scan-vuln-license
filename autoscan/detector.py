@@ -35,6 +35,14 @@ def detect_project(path: Path) -> Project | None:
     return Project(path=path, name=path.name, kind=kind, markers=sorted(set(markers)))
 
 
+def _is_under(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def discover_projects(root: Path, recursive_depth: int = 3) -> list[Project]:
     root = root.resolve()
     found: dict[Path, Project] = {}
@@ -42,6 +50,11 @@ def discover_projects(root: Path, recursive_depth: int = 3) -> list[Project]:
     direct = detect_project(root)
     if direct:
         found[direct.path] = direct
+
+    top_level_dirs = [
+        child for child in sorted(root.iterdir())
+        if child.is_dir() and not child.is_symlink() and child.name not in IGNORE_DIR_NAMES
+    ]
 
     def walk(path: Path, depth: int) -> None:
         if depth > recursive_depth:
@@ -55,4 +68,14 @@ def discover_projects(root: Path, recursive_depth: int = 3) -> list[Project]:
             walk(child, depth + 1)
 
     walk(root, 1)
+    if direct is None:
+        for child in top_level_dirs:
+            has_project_inside = any(_is_under(project_path, child) for project_path in found)
+            if not has_project_inside:
+                found[child.resolve()] = Project(
+                    path=child.resolve(),
+                    name=child.name,
+                    kind="unknown",
+                    markers=[],
+                )
     return sorted(found.values(), key=lambda project: str(project.path).lower())

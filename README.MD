@@ -18,7 +18,7 @@ Hoac chay truc tiep bang Python:
 python autoscan.py "D:\Projects"
 ```
 
-Neu `D:\Projects` la mot project, tool scan mot project. Neu `D:\Projects` la folder cha chua nhieu service, tool tu scan tung service va merge report.
+Neu `D:\Projects` la mot project, tool scan mot project. Neu `D:\Projects` la folder cha chua nhieu service, tool tu scan tung service va merge report. Folder service cap 1 nao khong detect duoc marker nhu `pom.xml`/`package.json` van se duoc scan bang `trivy fs` voi kind `unknown`, de tranh bo sot folder.
 
 Ket qua cuoi cung:
 
@@ -107,6 +107,7 @@ trivy --version
 | Go | `go.mod` |
 | PHP | `composer.json`, `composer.lock` |
 | Ruby | `Gemfile`, `Gemfile.lock` |
+| Unknown | Folder service cap 1 khong co marker, fallback `trivy fs` |
 
 Neu khong co generator rieng hoac generator rieng bi fail, tool fallback ve:
 
@@ -287,6 +288,8 @@ python autoscan.py "D:\Projects" --dry-run --recursive-depth 5
 ```
 
 Neu van khong thay, kiem tra folder co file marker nhu `pom.xml`, `package.json`, `.csproj`, `go.mod`, ...
+
+Neu root la folder cha chua nhieu service, cac folder cap 1 khong co marker se hien la `[unknown]` va van duoc scan bang `trivy fs`.
 
 ### Maven/Gradle/Node/.NET generator fail
 
