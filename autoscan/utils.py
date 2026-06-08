@@ -27,8 +27,9 @@ def tool_exists(name: str) -> bool:
 
 def first_existing_tool(names: Iterable[str]) -> str | None:
     for name in names:
-        if tool_exists(name):
-            return name
+        resolved = shutil.which(name)
+        if resolved:
+            return resolved
     return None
 
 
