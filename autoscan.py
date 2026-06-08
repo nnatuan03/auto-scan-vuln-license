@@ -51,6 +51,11 @@ def main(argv: list[str] | None = None) -> int:
     if merged:
         print(f"Report     : {merged}")
         print(f"Stable copy: {run_dir.parent / 'consolidated-report.html'}")
+    debug_report = run_dir / "debug-report.md"
+    stable_debug_report = run_dir.parent / "debug-report.md"
+    if debug_report.is_file():
+        print(f"Debug      : {debug_report}")
+        print(f"Stable dbg : {stable_debug_report}")
     print("")
 
     if not results:

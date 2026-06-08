@@ -225,8 +225,10 @@ def _run_dotnet(project: Project, output_sbom: Path, log_file: Path) -> tuple[Pa
                 cyclonedx = str(candidate)
         if not cyclonedx:
             return None, records
+    targets = sorted(project.path.glob("*.sln")) + sorted(project.path.glob("*.csproj"))
+    target = targets[0] if targets else project.path
     started_at = time.time()
-    command = [cyclonedx, str(project.path), "-j"]
+    command = [cyclonedx, str(target), "-j"]
     record, _, _ = run_command(command, cwd=project.path, log_file=log_file)
     records.append(record)
     after = _latest_matching_file(

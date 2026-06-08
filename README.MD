@@ -25,6 +25,8 @@ Ket qua cuoi cung:
 ```text
 D:\Projects\scan-results\consolidated-report.html
 D:\Projects\scan-results\scan-summary.json
+D:\Projects\scan-results\debug-report.md
+D:\Projects\scan-results\debug-report.json
 ```
 
 ## Kien truc file
@@ -39,6 +41,7 @@ auto-scan-vuln-lic/
     __init__.py
     batch.py
     config.py
+    debug_report.py
     detector.py
     license_normalizer.py
     license_rules.py
@@ -68,6 +71,7 @@ Vai tro chinh:
 | `autoscan/trivy_runner.py` | Chay Trivy va tao output JSON/TXT. |
 | `autoscan/scanner.py` | Scan mot project/service. |
 | `autoscan/batch.py` | Scan nhieu project/service song song va tao report tong hop. |
+| `autoscan/debug_report.py` | Tao debug report de doi chieu document, detect marker, command, SBOM/license count. |
 | `autoscan/reporting/single_report.py` | Engine sinh report HTML tung service. |
 | `autoscan/reporting/merge_report.py` | Engine sinh report HTML tong hop. |
 
@@ -140,6 +144,28 @@ Voi moi project/service:
    - `report.html`
    - `report-vuln.html`
 8. Merge tat ca service thanh `consolidated-report.html`.
+9. Sinh `debug-report.md/json` de doi chieu voi document va debug tung service.
+
+## Doi chieu voi document ITS
+
+Tool dang cover cac case license/dependency scan trong document, tru cac phan ban da loai khoi scope:
+
+| Case trong document | Cach tool cover |
+| --- | --- |
+| Trivy dependency vulnerability scan | Chay `trivy sbom --scanners vuln --format json`, sau do sinh `report-vuln.html`. |
+| Gradle license scan | Chay `gradlew/gradle cyclonedxBom`; neu thieu plugin thi dung init script tam voi `org.cyclonedx.bom` version `2.3.1`. |
+| Maven license scan | Chay `mvnw/mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom`. |
+| Node.js npm/package-lock license scan | Chay `npx --yes @cyclonedx/cyclonedx-npm --ignore-npm-errors`; neu co lock npm thi dung `--package-lock-only`. |
+| .NET license scan | Tu cai `CycloneDX` neu thieu, roi chay `dotnet-CycloneDX` tren `.sln`/`.csproj`. |
+| Normalize SBOM truoc khi scan license | Tao `SBOM.cdx-fix.json` bang module normalize noi bo. |
+| License TXT/JSON | Tao `license.txt` va `license.json` cho tung service. |
+
+Khac biet co chu dich:
+
+- SBOM duoc tao moi trong `scan-results\<timestamp>` moi lan scan, khong ghi/dependency vao `third-party`, de tranh re-scan dung SBOM cu.
+- Gradle khong tu sua `build.gradle`/`build.gradle.kts`; init script tam chi nam trong output.
+- `report-vuln.html` duoc sinh tu `vuln.json` bang template noi bo thay vi `html.tpl` cua Trivy.
+- SonarQ/SonarQube va Script CI/CD/Jenkins/email dang exclude theo scope ban da chot.
 
 ## Output
 
@@ -155,9 +181,13 @@ Output:
 D:\Projects\scan-results\
   consolidated-report.html
   scan-summary.json
+  debug-report.md
+  debug-report.json
   20260603-153000\
     consolidated-report.html
     scan-summary.json
+    debug-report.md
+    debug-report.json
     services\
       service-a\
         SBOM.cdx.json
@@ -176,8 +206,32 @@ File quan trong nhat:
 
 - `scan-results\consolidated-report.html`: report tong hop cuoi cung.
 - `scan-results\scan-summary.json`: summary may-doc-duoc, gom OK/FAIL, count vuln/license, path output tung service.
+- `scan-results\debug-report.md`: debug report de doc nhanh, gom doi chieu document, service detect, command da chay, count SBOM/license.
+- `scan-results\debug-report.json`: debug report dang JSON de gui/parse lai khi can trace sau.
 - `services\<service>\scan.log`: log command chi tiet de debug.
 - `services\<service>\license-normalize.log`: thong ke so component co license trong SBOM va cac license da normalize.
+
+## Debug khi ket qua bi thieu/sai
+
+Chay dry-run truoc de xem tool detect du bao nhieu service:
+
+```powershell
+.\run_scan.ps1 -Path "D:\Projects" -DryRun
+```
+
+Sau khi scan xong, mo:
+
+```text
+D:\Projects\scan-results\debug-report.md
+```
+
+Trong file debug, kiem tra theo thu tu:
+
+- `Document Coverage`: case nao dang covered, case nao khac document co chu dich, case nao excluded.
+- `Services`: service nao duoc detect, kind gi, marker nao, SBOM tao bang generator nao.
+- `Commands`: command thuc te da chay va exit code.
+- `fixed components`: so component trong `SBOM.cdx-fix.json`; neu so nay da thieu thi loi nam o buoc tao SBOM.
+- `SBOM license rows` va `Trivy licenses`: neu SBOM co du license rows nhung Trivy thieu, tool se backfill vao report.
 
 ## Tuy chon CLI
 

@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import DEFAULT_RESULTS_DIR
+from .debug_report import write_debug_reports
 from .detector import discover_projects
 from .models import ScanResult
 from .reporting.reports import generate_merged_report
@@ -39,10 +40,15 @@ def scan_all(
 
     projects = discover_projects(root, recursive_depth=recursive_depth)
     if not projects:
+        debug_paths = write_debug_reports(root, run_dir, output_base, [], None, dry_run)
         summary = {
             "root": str(root),
             "run_dir": str(run_dir),
             "status": "NO_PROJECTS",
+            "debug_report": str(debug_paths["debug_report"]),
+            "debug_report_json": str(debug_paths["debug_report_json"]),
+            "stable_debug_report": str(debug_paths["stable_debug_report"]),
+            "stable_debug_report_json": str(debug_paths["stable_debug_report_json"]),
             "projects": [],
         }
         write_json(run_dir / "scan-summary.json", summary)
@@ -72,11 +78,16 @@ def scan_all(
         merged_report = generate_merged_report(services_dir, run_dir / "consolidated-report.html")
         shutil.copy2(merged_report, output_base / "consolidated-report.html")
 
+    debug_paths = write_debug_reports(root, run_dir, output_base, results, merged_report, dry_run)
     summary = {
         "root": str(root),
         "run_dir": str(run_dir),
         "consolidated_report": str(merged_report) if merged_report else None,
         "stable_consolidated_report": str(output_base / "consolidated-report.html") if merged_report else None,
+        "debug_report": str(debug_paths["debug_report"]),
+        "debug_report_json": str(debug_paths["debug_report_json"]),
+        "stable_debug_report": str(debug_paths["stable_debug_report"]),
+        "stable_debug_report_json": str(debug_paths["stable_debug_report_json"]),
         "total_projects": len(results),
         "ok": sum(1 for r in results if r.status == "OK"),
         "failed": sum(1 for r in results if r.status == "FAIL"),

@@ -35,6 +35,7 @@ class ScanResult:
     project_path: Path
     project_kind: str
     output_dir: Path
+    project_markers: list[str] = field(default_factory=list)
     status: str = "FAIL"
     sbom_status: str = "-"
     sbom_path: Path | None = None
@@ -51,6 +52,7 @@ class ScanResult:
     notes: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     commands: list[CommandRecord] = field(default_factory=list)
+    debug: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         data = asdict(self)

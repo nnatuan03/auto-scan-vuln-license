@@ -26,8 +26,14 @@ def scan_project(project: Project | Path, output_dir: Path, trivy_only: bool = F
         name=project.name,
         project_path=project.path,
         project_kind=project.kind,
+        project_markers=sorted(set(project.markers)),
         output_dir=output_dir,
     )
+    result.debug.update({
+        "detected_kind": project.kind,
+        "detected_markers": sorted(set(project.markers)),
+        "source_path": str(project.path),
+    })
 
     if dry_run:
         result.status = "DRYRUN"
@@ -41,11 +47,15 @@ def scan_project(project: Project | Path, output_dir: Path, trivy_only: bool = F
         result.sbom_path = sbom
         result.sbom_status = sbom_status
         result.commands.extend(sbom_commands)
+        result.debug["sbom_status"] = sbom_status
+        result.debug["sbom_path"] = str(sbom)
 
         fixed_sbom = output_dir / "SBOM.cdx-fix.json"
         license_log = output_dir / "license-normalize.log"
-        normalize_sbom(sbom, fixed_sbom, license_log)
+        _, normalize_stats = normalize_sbom(sbom, fixed_sbom, license_log)
         result.fixed_sbom_path = fixed_sbom
+        result.debug["license_normalize_stats"] = normalize_stats
+        result.debug["fixed_sbom_path"] = str(fixed_sbom)
 
         outputs, vuln_count, license_count, trivy_commands = scan_sbom(fixed_sbom, output_dir, log_file)
         result.commands.extend(trivy_commands)
@@ -55,13 +65,19 @@ def scan_project(project: Project | Path, output_dir: Path, trivy_only: bool = F
         result.vuln_json = outputs["vuln_json"]
         result.vuln_count = vuln_count
         result.license_count = license_count
+        result.debug["trivy_outputs"] = {key: str(path) for key, path in outputs.items()}
 
         result.report_html = generate_single_report(result.report_json, output_dir / "report.html")
         result.vuln_html = generate_single_report(result.vuln_json, output_dir / "report-vuln.html")
+        result.debug["html_outputs"] = {
+            "report_html": str(result.report_html),
+            "vuln_html": str(result.vuln_html),
+        }
         result.status = "OK"
     except (SbomGenerationError, TrivyScanError, OSError, ValueError) as exc:
         result.errors.append(str(exc))
         result.status = "FAIL"
+        result.debug["error"] = str(exc)
     finally:
         result.elapsed_seconds = round(time.monotonic() - started, 3)
 
