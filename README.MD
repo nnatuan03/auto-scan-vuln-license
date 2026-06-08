@@ -63,6 +63,7 @@ auto-scan-vuln-lic/
     batch.py
     config.py
     debug_report.py
+    dependency_health.py
     detector.py
     license_normalizer.py
     license_rules.py
@@ -88,6 +89,7 @@ Vai tro chinh:
 | `autoscan.py` | Entrypoint chinh, nhan path va dieu phoi scan. |
 | `run_scan.ps1` | Wrapper PowerShell de chay mot lenh tren Windows. |
 | `autoscan/detector.py` | Tu detect Maven, Gradle, Node, Flutter, .NET, Python, Go, PHP, Ruby. |
+| `autoscan/dependency_health.py` | Detect lock file thieu/cu va mismatch giua manifest voi lock truoc khi tao SBOM. |
 | `autoscan/sbom_generator.py` | Tao SBOM theo tung loai source, fallback ve `trivy fs`. |
 | `autoscan/license_normalizer.py` | Chuan hoa license SBOM ve SPDX/LicenseRef. |
 | `autoscan/license_rules.py` | Bo rule normalize license tu ten vendor/free-text ve SPDX ID. |
@@ -256,12 +258,24 @@ Trong file debug, kiem tra theo thu tu:
 
 - `Document Coverage`: case nao dang covered, case nao khac document co chu dich, case nao excluded.
 - `Services`: service nao duoc detect, kind gi, marker nao, SBOM tao bang generator nao.
+- `Dependency health`: canh bao lock file thieu, dependency trong manifest khong co trong lock, hoac manifest version cao hon lock version.
 - `Commands`: command thuc te da chay va exit code.
 - `Retry/fallback note` va `Command failures`: command fail/success tiep theo, kem stderr tail, dung de xem ly do fallback.
 - `Pkg name recovery`: so dong report goc thieu package name, so dong tool recover duoc, so dong van unknown.
 - `Version updates`: so component trong SBOM duoc nang len version moi hon tim thay trong source/lock file.
 - `fixed components`: so component trong `SBOM.cdx-fix.json`; neu so nay da thieu thi loi nam o buoc tao SBOM.
 - `SBOM license rows` va `Trivy licenses`: neu SBOM co du license rows nhung Trivy thieu, tool se backfill vao report.
+
+Dependency health status hay gap:
+
+| Status | Y nghia |
+| --- | --- |
+| `DEPENDENCY_HEALTH_OK` | Khong thay mismatch manifest/lock trong cac case tool ho tro. |
+| `LOCK_FILE_MISSING` | Co manifest nhu `package.json`, `pubspec.yaml`, `composer.json`, `Gemfile`, nhung thieu lock file tuong ung. |
+| `MANIFEST_LOCK_MISMATCH` | Manifest yeu cau version moi hon nhung lock van resolve version cu; scan se theo lock/SBOM. |
+| `LOCK_DEPENDENCY_MISSING` | Manifest khai bao dependency nhung lock khong co dependency do. |
+| `UNPINNED_DEPENDENCY` | Python `requirements.txt` co dependency khong pin bang `==`. |
+| `BUILD_FILE_MISSING` | Khong tim thay build/dependency manifest du de resolve dependency theo ecosystem. |
 
 ## Tuy chon CLI
 

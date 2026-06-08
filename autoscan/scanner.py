@@ -4,13 +4,31 @@ import time
 from pathlib import Path
 
 from .detector import detect_project
+from .dependency_health import analyze_dependency_health
 from .license_normalizer import normalize_sbom
 from .models import Project, ScanResult
 from .reporting.reports import generate_single_report
 from .sbom_generator import SbomGenerationError, generate_sbom
 from .trivy_runner import TrivyScanError, scan_sbom
-from .utils import ensure_dir
+from .utils import ensure_dir, load_json, write_json
 from .version_reconciler import reconcile_sbom_versions
+
+
+def _attach_autoscan_metadata(paths: list[Path | None], key: str, value: object) -> None:
+    for path in paths:
+        if not path or not path.is_file():
+            continue
+        data = load_json(path)
+        metadata = data.setdefault("Metadata", {})
+        if not isinstance(metadata, dict):
+            data["Metadata"] = {}
+            metadata = data["Metadata"]
+        autoscan = metadata.setdefault("AutoScan", {})
+        if not isinstance(autoscan, dict):
+            metadata["AutoScan"] = {}
+            autoscan = metadata["AutoScan"]
+        autoscan[key] = value
+        write_json(path, data)
 
 
 def scan_project(project: Project | Path, output_dir: Path, trivy_only: bool = False, dry_run: bool = False) -> ScanResult:
@@ -35,6 +53,10 @@ def scan_project(project: Project | Path, output_dir: Path, trivy_only: bool = F
         "detected_markers": sorted(set(project.markers)),
         "source_path": str(project.path),
     })
+    dependency_health = analyze_dependency_health(project)
+    result.debug["dependency_health"] = dependency_health
+    for issue in dependency_health.get("issues") or []:
+        result.notes.append(f"{issue.get('code')}: {issue.get('message')}")
 
     if dry_run:
         result.status = "DRYRUN"
@@ -70,6 +92,11 @@ def scan_project(project: Project | Path, output_dir: Path, trivy_only: bool = F
         result.license_count = license_count
         result.debug["trivy_outputs"] = {key: str(path) for key, path in outputs.items()}
         result.debug["package_name_resolution"] = package_name_stats
+        _attach_autoscan_metadata(
+            [result.report_json, result.license_json, result.vuln_json],
+            "dependency_health",
+            dependency_health,
+        )
 
         result.report_html = generate_single_report(result.report_json, output_dir / "report.html")
         result.vuln_html = generate_single_report(result.vuln_json, output_dir / "report-vuln.html")

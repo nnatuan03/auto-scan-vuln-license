@@ -1,5 +1,6 @@
 import json
 import sys
+from html import escape
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
@@ -57,10 +58,46 @@ def get_license_badge_color(license_name):
     else:
         return ("#4a5568", "#f7fafc")
 
+
+def dependency_health_html(health):
+    if not isinstance(health, dict) or not health:
+        return ""
+    status = str(health.get("status") or "DEPENDENCY_HEALTH_UNKNOWN")
+    issues = health.get("issues") or []
+    tone = "ok" if status == "DEPENDENCY_HEALTH_OK" else "warn"
+    issue_items = ""
+    for issue in issues[:8]:
+        bits = [
+            issue.get("dependency"),
+            issue.get("declared"),
+            issue.get("resolved"),
+            issue.get("lock_file"),
+        ]
+        detail = " / ".join(str(bit) for bit in bits if bit)
+        suffix = f" <span>{escape(detail)}</span>" if detail else ""
+        issue_items += (
+            f"<li><strong>{escape(str(issue.get('code') or 'WARN'))}</strong>: "
+            f"{escape(str(issue.get('message') or ''))}{suffix}</li>"
+        )
+    if not issue_items:
+        issue_items = "<li>No manifest/lock mismatch detected.</li>"
+    manifest_files = ", ".join(health.get("manifest_files") or []) or "-"
+    lock_files = ", ".join(health.get("lock_files") or []) or "-"
+    return f"""
+  <div class="health-banner health-{tone}">
+    <div class="health-title">Dependency Health: {escape(status)}</div>
+    <div class="health-meta">Manifest: {escape(manifest_files)} &nbsp; Lock: {escape(lock_files)}</div>
+    <ul>{issue_items}</ul>
+  </div>"""
+
+
 def generate_html(report_path="report.json", output_path="report.html"):
     with open(report_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
+    metadata = data.get("Metadata") if isinstance(data.get("Metadata"), dict) else {}
+    autoscan_metadata = metadata.get("AutoScan") if isinstance(metadata.get("AutoScan"), dict) else {}
+    dependency_health = autoscan_metadata.get("dependency_health") if isinstance(autoscan_metadata.get("dependency_health"), dict) else {}
     results = data.get("Results", [])
     vuln_rows = []
     license_rows = []
@@ -366,6 +403,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
 
     vuln_json = json.dumps(vuln_rows, ensure_ascii=False).replace('</script>', '<\\/script>').replace('<!--', '<\\!--')
     lic_json  = json.dumps(license_rows, ensure_ascii=False).replace('</script>', '<\\/script>').replace('<!--', '<\\!--')
+    dependency_health_banner = dependency_health_html(dependency_health)
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -642,6 +680,42 @@ def generate_html(report_path="report.json", output_path="report.html"):
     font-size: 12px;
     color: #1e40af;
     margin-bottom: 14px;
+  }}
+
+  .health-banner {{
+    margin: 16px 40px 0;
+    border: 1px solid var(--border);
+    border-left: 4px solid #3182ce;
+    background: #f8fbff;
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    font-size: 12px;
+  }}
+  .health-banner.health-warn {{
+    border-left-color: #dd8500;
+    background: #fffaf0;
+  }}
+  .health-title {{
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 3px;
+  }}
+  .health-meta {{
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+  }}
+  .health-banner ul {{
+    margin: 0;
+    padding-left: 18px;
+    color: var(--text-secondary);
+  }}
+  .health-banner li + li {{ margin-top: 4px; }}
+  .health-banner li span {{
+    color: var(--text-muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
   }}
 
   /* ── LEGEND ── */
@@ -965,6 +1039,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
   <div class="metrics-bar">
     {metrics_html}
   </div>
+  {dependency_health_banner}
 
   <div class="nav-tabs">
     <div class="nav-tab active" onclick="switchTab('overview')">Overview</div>

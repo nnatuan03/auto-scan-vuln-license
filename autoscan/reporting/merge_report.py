@@ -10,6 +10,7 @@ generates a consolidated HTML + Excel report with a Paths column.
 import json
 import sys
 import os
+from html import escape
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
@@ -52,11 +53,30 @@ def get_license_badge_color(name):
     return ("#4a5568", "#f7fafc")
 
 
+def dependency_health_cell(health):
+    if not isinstance(health, dict) or not health:
+        return '<span class="health-chip health-ok">-</span>'
+    status = str(health.get("status") or "-")
+    issues = health.get("issues") or []
+    cls = "health-ok" if status == "DEPENDENCY_HEALTH_OK" else "health-warn"
+    detail = ""
+    if issues:
+        detail = "<div class=\"health-detail\">" + "<br>".join(
+            "{0}: {1}".format(
+                escape(str(issue.get("code") or "WARN")),
+                escape(str(issue.get("message") or ""))[:180],
+            )
+            for issue in issues[:4]
+        ) + "</div>"
+    return '<span class="health-chip {0}">{1}</span>{2}'.format(cls, escape(status), detail)
+
+
 def load_all_reports(be_dir):
     be_path = Path(be_dir)
     vuln_rows = []
     lic_rows  = []
     folders_found = []
+    health_by_folder = {}
 
     for sub in sorted(be_path.iterdir()):
         if not sub.is_dir():
@@ -73,6 +93,9 @@ def load_all_reports(be_dir):
         except Exception as e:
             print(f"  [WARN] Cannot read {report_json}: {e}")
             continue
+        metadata = data.get("Metadata") if isinstance(data.get("Metadata"), dict) else {}
+        autoscan_metadata = metadata.get("AutoScan") if isinstance(metadata.get("AutoScan"), dict) else {}
+        health_by_folder[folder_name] = autoscan_metadata.get("dependency_health") if isinstance(autoscan_metadata.get("dependency_health"), dict) else {}
 
         for result in data.get("Results", []):
             result_target = result.get("Target", "")
@@ -110,7 +133,7 @@ def load_all_reports(be_dir):
                     "filepath": lc.get("FilePath", "-") or "-",
                 })
 
-    return vuln_rows, lic_rows, folders_found
+    return vuln_rows, lic_rows, folders_found, health_by_folder
 
 
 def group_vulns(vuln_rows):
@@ -232,7 +255,7 @@ def paths_html(folders, max_show=4):
 
 
 def generate_html(be_dir, output_html):
-    vuln_rows, lic_rows, folders_found = load_all_reports(be_dir)
+    vuln_rows, lic_rows, folders_found, health_by_folder = load_all_reports(be_dir)
     vuln_groups = group_vulns(vuln_rows)
     lic_groups  = group_licenses(lic_rows)
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -351,7 +374,11 @@ def generate_html(be_dir, output_html):
     cat_options = "\n".join('<option value="{0}">{0}</option>'.format(c) for c in all_cats)
 
     services_rows = "".join(
-        '<tr class="data-row"><td style="color:var(--text-muted);font-family:IBM Plex Mono,monospace;font-size:11px">{0:02d}</td><td class="pkg-name">{1}</td><td><span class="fix-version">found</span></td></tr>'.format(i+1, f)
+        '<tr class="data-row"><td style="color:var(--text-muted);font-family:IBM Plex Mono,monospace;font-size:11px">{0:02d}</td><td class="pkg-name">{1}</td><td>{2}</td><td><span class="fix-version">found</span></td></tr>'.format(
+            i + 1,
+            f,
+            dependency_health_cell(health_by_folder.get(f)),
+        )
         for i, f in enumerate(folders_found)
     )
 
@@ -442,6 +469,10 @@ def generate_html(be_dir, output_html):
   .cve-link:hover{text-decoration:underline}
   .version-tag{font-family:'IBM Plex Mono',monospace;font-size:11px;background:var(--slate-100);color:var(--text-secondary);padding:2px 7px;border-radius:var(--radius);border:1px solid var(--border);display:inline-block}
   .fix-version{font-family:'IBM Plex Mono',monospace;font-size:11px;background:#f0fff6;color:#1a7a4a;padding:2px 7px;border-radius:var(--radius);border:1px solid #c6f6d5;display:inline-block}
+  .health-chip{display:inline-flex;align-items:center;padding:3px 7px;border-radius:var(--radius);font-size:10px;font-weight:700;font-family:'IBM Plex Mono',monospace;border:1px solid var(--border)}
+  .health-ok{color:#1a7a4a;background:#f0fff6;border-color:#b8e6c8}
+  .health-warn{color:#9a5b00;background:#fff8e6;border-color:#f3c77b}
+  .health-detail{margin-top:5px;color:var(--text-muted);font-size:11px;line-height:1.4;max-width:520px}
   .sev-chip{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.05em;padding:2px 8px;border-radius:var(--radius);border:1px solid}
   .lic-chip{display:inline-block;font-size:11px;font-weight:500;padding:2px 8px;border-radius:var(--radius);border:1px solid;margin:2px 2px 2px 0;white-space:nowrap}
   .action-chip{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.04em;padding:2px 10px;border-radius:var(--radius);border:1px solid;text-transform:uppercase}
@@ -601,7 +632,7 @@ def generate_html(be_dir, output_html):
     </div>
     <div class="table-wrap"><div class="table-scroll">
     <table>
-      <thead><tr><th>#</th><th>Service Name</th><th>Status</th></tr></thead>
+      <thead><tr><th>#</th><th>Service Name</th><th>Dependency Health</th><th>Status</th></tr></thead>
       <tbody>""" + services_rows + """</tbody>
     </table>
     </div></div>

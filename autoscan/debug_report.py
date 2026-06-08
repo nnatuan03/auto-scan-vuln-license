@@ -81,6 +81,13 @@ DOCUMENT_COVERAGE: list[dict[str, str]] = [
         "difference": "Debug report shows how many rows were missing raw names and which fallback source recovered them.",
     },
     {
+        "case": "Stale or missing dependency lock/build files",
+        "document": "Re-scan must reflect the dependency versions in the submitted source, not stale generated artifacts.",
+        "implementation": "Checks manifest/build files against lock files for Node, Flutter, PHP, Ruby, Python, Go and warns for missing build/lock or manifest-lock version mismatch before SBOM generation.",
+        "status": "COVERED_PLUS",
+        "difference": "The scanner warns and records evidence; it does not modify vendor lock files or upgrade dependencies.",
+    },
+    {
         "case": "Script CI/CD/Jenkins license scan and email",
         "document": "Scripts scan SBOMs under third-party/sbom-reports and send result via email.",
         "implementation": "Not implemented in this local runner.",
@@ -240,6 +247,13 @@ def _package_resolution_counts(stats: dict[str, Any] | None) -> str:
     return "; ".join(parts)
 
 
+def _dependency_health_summary(health: dict[str, Any] | None) -> str:
+    if not health:
+        return "-"
+    issues = health.get("issues") or []
+    return f"{health.get('status', '-')} ({len(issues)} issue(s))"
+
+
 def _service_debug(result: ScanResult) -> dict[str, Any]:
     scan_log = result.output_dir / "scan.log"
     normalize_log = result.output_dir / "license-normalize.log"
@@ -290,6 +304,7 @@ def _service_debug(result: ScanResult) -> dict[str, Any]:
         "errors": result.errors,
         "internal_debug": result.debug,
         "package_name_resolution": result.debug.get("package_name_resolution") or {},
+        "dependency_health": result.debug.get("dependency_health") or {},
         "scan_log_tail": _tail_lines(scan_log),
         "license_normalize_log_tail": _tail_lines(normalize_log),
     }
@@ -380,13 +395,14 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
         "",
     ])
     lines.extend(_markdown_table(
-        ["Service", "Kind", "Status", "SBOM", "Fixed components", "Version updates", "SBOM license rows", "Trivy licenses", "Pkg name recovery", "Markers"],
+        ["Service", "Kind", "Status", "SBOM", "Dependency health", "Fixed components", "Version updates", "SBOM license rows", "Trivy licenses", "Pkg name recovery", "Markers"],
         [
             [
                 service["name"],
                 service["kind"],
                 service["status"],
                 service["sbom_status"],
+                _dependency_health_summary(service.get("dependency_health")),
                 service["counts"]["fixed_sbom"].get("components_total", "-"),
                 (service["internal_debug"].get("version_reconcile_stats") or {}).get("updated_components", "-"),
                 service["counts"].get("license_rows_from_fixed_sbom", "-"),
@@ -411,6 +427,26 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
             f"- Scan log: `{service['paths']['scan_log']}`",
             f"- License normalize log: `{service['paths']['license_normalize_log']}`",
         ])
+        dependency_health = service.get("dependency_health") or {}
+        if dependency_health:
+            lines.append(
+                "- Dependency health: "
+                f"`{dependency_health.get('status', '-')}`; "
+                f"manifest files `{', '.join(dependency_health.get('manifest_files') or []) or '-'}`; "
+                f"lock files `{', '.join(dependency_health.get('lock_files') or []) or '-'}`"
+            )
+            for issue in (dependency_health.get("issues") or [])[:20]:
+                detail_parts = [
+                    issue.get("dependency"),
+                    issue.get("declared"),
+                    issue.get("resolved"),
+                    issue.get("lock_file"),
+                ]
+                detail = " / ".join(str(part) for part in detail_parts if part)
+                suffix = f" ({detail})" if detail else ""
+                lines.append(
+                    f"  - `{issue.get('code')}`: {issue.get('message')}{suffix}"
+                )
         version_stats = service["internal_debug"].get("version_reconcile_stats") or {}
         if version_stats and (version_stats.get("candidate_packages") or version_stats.get("updated_components")):
             lines.append(
@@ -482,9 +518,10 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
         "",
         "1. If `fixed components` is lower than expected, inspect the SBOM generation command and `scan.log`.",
         "2. If `fixed components` is correct but `Trivy licenses` is lower, check the SBOM backfill section in `scan.log`.",
-        "3. If a Node.js frontend is missing transitive packages, check lock files in the service row and commit the correct lock file.",
-        "4. If `Pkg name recovery` has `unknown > 0`, inspect the listed sample fields in this debug report and the matching `report.json` row.",
-        "5. Use `--dry-run` to confirm every service folder is detected before running the full scan.",
+        "3. If `Dependency health` is not `DEPENDENCY_HEALTH_OK`, fix the listed manifest/lock mismatch before trusting a vendor re-scan.",
+        "4. If a Node.js frontend is missing transitive packages, check lock files in the service row and commit the correct lock file.",
+        "5. If `Pkg name recovery` has `unknown > 0`, inspect the listed sample fields in this debug report and the matching `report.json` row.",
+        "6. Use `--dry-run` to confirm every service folder is detected before running the full scan.",
         "",
     ])
     return "\n".join(lines)
