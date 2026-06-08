@@ -20,6 +20,20 @@ python autoscan.py "D:\Projects"
 
 Neu `D:\Projects` la mot project, tool scan mot project. Neu `D:\Projects` la folder cha chua nhieu service, tool tu scan tung service va merge report. Folder service cap 1 nao khong detect duoc marker nhu `pom.xml`/`package.json` van se duoc scan bang `trivy fs` voi kind `unknown`, de tranh bo sot folder.
 
+Khi chay, terminal se hien dashboard tien do:
+
+```text
+Auto Scan Dashboard
+===================
+Stage    : scanning
+Progress : [###############---------------] 5/10 ( 50.0%)
+Status   : DONE=5 OK=5 FAIL=0 RUNNING=5
+Elapsed  : 03:20
+ETA      : 03:20
+```
+
+Dashboard cap nhat sau moi service hoan tat va khi bat dau merge report.
+
 Ket qua cuoi cung:
 
 ```text
@@ -46,6 +60,7 @@ auto-scan-vuln-lic/
     license_normalizer.py
     license_rules.py
     models.py
+    progress.py
     scanner.py
     sbom_generator.py
     trivy_runner.py
@@ -72,6 +87,7 @@ Vai tro chinh:
 | `autoscan/scanner.py` | Scan mot project/service. |
 | `autoscan/batch.py` | Scan nhieu project/service song song va tao report tong hop. |
 | `autoscan/debug_report.py` | Tao debug report de doi chieu document, detect marker, command, SBOM/license count. |
+| `autoscan/progress.py` | Dashboard terminal hien tien do %, elapsed va ETA trong luc scan. |
 | `autoscan/reporting/single_report.py` | Engine sinh report HTML tung service. |
 | `autoscan/reporting/merge_report.py` | Engine sinh report HTML tong hop. |
 
@@ -251,6 +267,10 @@ python autoscan.py "D:\Projects" --trivy-only
 python autoscan.py "D:\Projects" --dry-run
 ```
 
+```powershell
+python autoscan.py "D:\Projects" --no-dashboard
+```
+
 Y nghia:
 
 | Option | Cong dung |
@@ -260,6 +280,7 @@ Y nghia:
 | `--trivy-only` | Bo qua generator Maven/Gradle/Node/.NET, chi dung `trivy fs`. |
 | `--dry-run` | Chi detect project, khong chay Trivy hay tool ngoai. |
 | `--output` | Doi folder output mac dinh. |
+| `--no-dashboard` | Tat dashboard tien do trong terminal neu muon log gon. |
 
 PowerShell wrapper co option tuong ung:
 
@@ -267,6 +288,7 @@ PowerShell wrapper co option tuong ung:
 .\run_scan.ps1 -Path "D:\Projects" -MaxWorkers 6 -RecursiveDepth 4
 .\run_scan.ps1 -Path "D:\Projects" -TrivyOnly
 .\run_scan.ps1 -Path "D:\Projects" -DryRun
+.\run_scan.ps1 -Path "D:\Projects" -NoDashboard
 ```
 
 ## Su dung report

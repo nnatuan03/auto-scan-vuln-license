@@ -6,6 +6,7 @@ from pathlib import Path
 
 from autoscan.batch import scan_all
 from autoscan.config import DEFAULT_MAX_WORKERS, DEFAULT_RECURSIVE_DEPTH
+from autoscan.progress import ProgressDashboard
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,6 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--recursive-depth", type=int, default=DEFAULT_RECURSIVE_DEPTH, help="Project discovery depth for nested services/workspaces.")
     parser.add_argument("--trivy-only", action="store_true", help="Skip ecosystem-specific SBOM generators and use trivy fs only.")
     parser.add_argument("--dry-run", action="store_true", help="Only detect projects; do not run external scan commands.")
+    parser.add_argument("--no-dashboard", action="store_true", help="Disable the console progress dashboard.")
     return parser
 
 
@@ -29,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     output = Path(args.output).expanduser().resolve() if args.output else None
+    dashboard = ProgressDashboard(enabled=not args.no_dashboard)
     run_dir, results, merged = scan_all(
         root=root,
         output_base=output,
@@ -36,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
         recursive_depth=max(0, args.recursive_depth),
         trivy_only=args.trivy_only,
         dry_run=args.dry_run,
+        progress_callback=dashboard,
     )
 
     print("")

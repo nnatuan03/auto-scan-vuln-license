@@ -4,7 +4,8 @@ param(
     [int]$MaxWorkers = 4,
     [int]$RecursiveDepth = 5,
     [switch]$TrivyOnly,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$NoDashboard
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,6 +41,9 @@ if ($TrivyOnly) {
 }
 if ($DryRun) {
     $argsList += "--dry-run"
+}
+if ($NoDashboard) {
+    $argsList += "--no-dashboard"
 }
 
 & $pythonCmd.Source @argsList

@@ -4,6 +4,7 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Callable
 
 from .config import DEFAULT_RESULTS_DIR
 from .debug_report import write_debug_reports
@@ -12,6 +13,8 @@ from .models import ScanResult
 from .reporting.reports import generate_merged_report
 from .scanner import scan_project
 from .utils import ensure_dir, safe_name, write_json
+
+ProgressCallback = Callable[[str, dict[str, Any]], None]
 
 
 def make_run_dir(base_output_dir: Path) -> Path:
@@ -31,6 +34,7 @@ def scan_all(
     recursive_depth: int = 3,
     trivy_only: bool = False,
     dry_run: bool = False,
+    progress_callback: ProgressCallback | None = None,
 ) -> tuple[Path, list[ScanResult], Path | None]:
     root = root.resolve()
     output_base = (output_base or (root / DEFAULT_RESULTS_DIR)).resolve()
@@ -39,6 +43,13 @@ def scan_all(
     services_dir = ensure_dir(run_dir / "services")
 
     projects = discover_projects(root, recursive_depth=recursive_depth)
+    if progress_callback:
+        progress_callback("start", {
+            "root": root,
+            "run_dir": run_dir,
+            "total": len(projects),
+            "projects": projects,
+        })
     if not projects:
         debug_paths = write_debug_reports(root, run_dir, output_base, [], None, dry_run)
         summary = {
@@ -53,6 +64,13 @@ def scan_all(
         }
         write_json(run_dir / "scan-summary.json", summary)
         write_json(output_base / "scan-summary.json", summary)
+        if progress_callback:
+            progress_callback("finish", {
+                "completed": 0,
+                "ok": 0,
+                "failed": 0,
+                "debug_report": debug_paths["debug_report"],
+            })
         return run_dir, [], None
 
     results: list[ScanResult] = []
@@ -71,10 +89,23 @@ def scan_all(
 
         for future in as_completed(future_map):
             results.append(future.result())
+            if progress_callback:
+                progress_callback("project_complete", {
+                    "result": results[-1],
+                    "completed": len(results),
+                    "ok": sum(1 for r in results if r.status == "OK"),
+                    "failed": sum(1 for r in results if r.status == "FAIL"),
+                })
 
     results.sort(key=lambda r: r.name.lower())
     merged_report: Path | None = None
     if not dry_run and any(r.status == "OK" for r in results):
+        if progress_callback:
+            progress_callback("merge_start", {
+                "completed": len(results),
+                "ok": sum(1 for r in results if r.status == "OK"),
+                "failed": sum(1 for r in results if r.status == "FAIL"),
+            })
         merged_report = generate_merged_report(services_dir, run_dir / "consolidated-report.html")
         shutil.copy2(merged_report, output_base / "consolidated-report.html")
 
@@ -96,4 +127,12 @@ def scan_all(
     }
     write_json(run_dir / "scan-summary.json", summary)
     write_json(output_base / "scan-summary.json", summary)
+    if progress_callback:
+        progress_callback("finish", {
+            "completed": len(results),
+            "ok": summary["ok"],
+            "failed": summary["failed"],
+            "merged_report": merged_report,
+            "debug_report": debug_paths["debug_report"],
+        })
     return run_dir, results, merged_report
