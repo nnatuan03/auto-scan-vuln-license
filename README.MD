@@ -80,6 +80,8 @@ auto-scan-vuln-lic/
       merge_report.py
       reports.py
       single_report.py
+  tests/
+    ecosystem_matrix.py
 ```
 
 Vai tro chinh:
@@ -103,6 +105,7 @@ Vai tro chinh:
 | `autoscan/terminal.py` | In command, status va mau terminal/PowerShell. |
 | `autoscan/reporting/single_report.py` | Engine sinh report HTML tung service. |
 | `autoscan/reporting/merge_report.py` | Engine sinh report HTML tong hop. |
+| `tests/ecosystem_matrix.py` | Tao fixture nhieu ecosystem de test detect/dependency-health/report recovery. |
 
 ## Yeu cau cai dat
 
@@ -276,6 +279,23 @@ Dependency health status hay gap:
 | `LOCK_DEPENDENCY_MISSING` | Manifest khai bao dependency nhung lock khong co dependency do. |
 | `UNPINNED_DEPENDENCY` | Python `requirements.txt` co dependency khong pin bang `==`. |
 | `BUILD_FILE_MISSING` | Khong tim thay build/dependency manifest du de resolve dependency theo ecosystem. |
+
+## Test matrix nhieu ecosystem
+
+Chay test fixture local, khong can cai Maven/Gradle/Flutter/PHP/Go:
+
+```powershell
+python tests\ecosystem_matrix.py
+```
+
+Test nay tu tao source mau cho Maven, Gradle, Node, Flutter, .NET, Python, Go, PHP, Ruby va unknown source. No verify cac case:
+
+- lock file OK
+- lock file thieu
+- manifest khai bao version moi hon lock
+- dependency co trong manifest nhung thieu trong lock
+- Python dependency khong pin version
+- report recover package name bi thieu
 
 ## Tuy chon CLI
 
