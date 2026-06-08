@@ -58,9 +58,22 @@ def _run_trivy_fs(project: Project, output_sbom: Path, log_file: Path) -> tuple[
     return output_sbom, "generated-trivy-fs", [record]
 
 
-def _maven_command(project: Project) -> list[str] | None:
+def _dedupe_commands(commands: list[list[str]]) -> list[list[str]]:
+    seen: set[str] = set()
+    unique: list[list[str]] = []
+    for command in commands:
+        key = str(Path(command[0]).resolve() if Path(command[0]).exists() else command[0]).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(command)
+    return unique
+
+
+def _maven_commands(project: Project) -> list[list[str]]:
+    commands: list[list[str]] = []
     if os.name == "nt" and (project.path / "mvnw.cmd").is_file():
-        return [str(project.path / "mvnw.cmd")]
+        commands.append([str(project.path / "mvnw.cmd")])
     if (project.path / "mvnw").is_file():
         mvnw = project.path / "mvnw"
         try:
@@ -68,42 +81,47 @@ def _maven_command(project: Project) -> list[str] | None:
             mvnw.chmod(mode | 0o111)
         except OSError:
             pass
-        return [str(mvnw)]
+        commands.append([str(mvnw)])
     mvn = first_existing_tool(("mvn", "mvn.cmd"))
     if mvn:
-        return [mvn]
-    return None
+        commands.append([mvn])
+    return _dedupe_commands(commands)
 
 
 def _run_maven(project: Project, output_sbom: Path, log_file: Path) -> tuple[Path | None, list[CommandRecord]]:
-    command = _maven_command(project)
-    if not command:
+    commands = _maven_commands(project)
+    if not commands:
         return None, []
-    started_at = time.time()
-    command = command + [
-        "org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom",
-        "-DskipTests",
-        "-DoutputFormat=json",
-        f"-DoutputDirectory={output_sbom.parent}",
-        "-DoutputName=SBOM.cdx",
-    ]
-    record, _, _ = run_command(command, cwd=project.path, log_file=log_file)
-    if record.returncode == 0 and output_sbom.is_file() and output_sbom.stat().st_mtime >= started_at:
-        return output_sbom, [record]
-    after = _latest_matching_file(
-        project.path,
-        ("bom.json", "*.cdx.json"),
-        modified_after=started_at,
-        exclude_roots=(output_sbom.parent,),
-    )
-    if record.returncode == 0 and after:
-        return _copy_or_raise(after, output_sbom), [record]
-    return None, [record]
+    records: list[CommandRecord] = []
+    for base_command in commands:
+        output_sbom.unlink(missing_ok=True)
+        started_at = time.time()
+        command = base_command + [
+            "org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom",
+            "-DskipTests",
+            "-DoutputFormat=json",
+            f"-DoutputDirectory={output_sbom.parent}",
+            "-DoutputName=SBOM.cdx",
+        ]
+        record, _, _ = run_command(command, cwd=project.path, log_file=log_file)
+        records.append(record)
+        if record.returncode == 0 and output_sbom.is_file() and output_sbom.stat().st_mtime >= started_at:
+            return output_sbom, records
+        after = _latest_matching_file(
+            project.path,
+            ("bom.json", "*.cdx.json"),
+            modified_after=started_at,
+            exclude_roots=(output_sbom.parent,),
+        )
+        if record.returncode == 0 and after:
+            return _copy_or_raise(after, output_sbom), records
+    return None, records
 
 
-def _gradle_command(project: Project) -> list[str] | None:
+def _gradle_commands(project: Project) -> list[list[str]]:
+    commands: list[list[str]] = []
     if os.name == "nt" and (project.path / "gradlew.bat").is_file():
-        return [str(project.path / "gradlew.bat"), "cyclonedxBom"]
+        commands.append([str(project.path / "gradlew.bat"), "cyclonedxBom"])
     if (project.path / "gradlew").is_file():
         gradlew = project.path / "gradlew"
         try:
@@ -111,36 +129,37 @@ def _gradle_command(project: Project) -> list[str] | None:
             gradlew.chmod(mode | 0o111)
         except OSError:
             pass
-        return [str(gradlew), "cyclonedxBom"]
+        commands.append([str(gradlew), "cyclonedxBom"])
     gradle = first_existing_tool(("gradle", "gradle.bat"))
     if gradle:
-        return [gradle, "cyclonedxBom"]
-    return None
+        commands.append([gradle, "cyclonedxBom"])
+    return _dedupe_commands(commands)
 
 
 def _run_gradle(project: Project, output_sbom: Path, log_file: Path) -> tuple[Path | None, list[CommandRecord]]:
-    command = _gradle_command(project)
-    if not command:
+    commands = _gradle_commands(project)
+    if not commands:
         return None, []
     records: list[CommandRecord] = []
-    started_at = time.time()
-    record, _, _ = run_command(command, cwd=project.path, log_file=log_file)
-    records.append(record)
-    generated = (
-        _latest_matching_file(
-            project.path / "build",
-            ("*.cdx.json", "bom.json", "application.cdx.json"),
-            modified_after=started_at,
+    for command in commands:
+        started_at = time.time()
+        record, _, _ = run_command(command, cwd=project.path, log_file=log_file)
+        records.append(record)
+        generated = (
+            _latest_matching_file(
+                project.path / "build",
+                ("*.cdx.json", "bom.json", "application.cdx.json"),
+                modified_after=started_at,
+            )
+            if (project.path / "build").exists()
+            else None
         )
-        if (project.path / "build").exists()
-        else None
-    )
-    if record.returncode == 0 and generated:
-        return _copy_or_raise(generated, output_sbom), records
+        if record.returncode == 0 and generated:
+            return _copy_or_raise(generated, output_sbom), records
 
-    init_script = output_sbom.parent / "cyclonedx-init.gradle"
-    init_script.write_text(
-        """
+        init_script = output_sbom.parent / "cyclonedx-init.gradle"
+        init_script.write_text(
+            """
 initscript {
     repositories { mavenCentral() }
     dependencies { classpath 'org.cyclonedx:cyclonedx-gradle-plugin:2.3.1' }
@@ -150,24 +169,24 @@ allprojects {
     apply plugin: 'org.cyclonedx.bom'
 }
 """.strip()
-        + "\n",
-        encoding="utf-8",
-    )
-    started_at = time.time()
-    init_command = [command[0], "--init-script", str(init_script), "cyclonedxBom"]
-    init_record, _, _ = run_command(init_command, cwd=project.path, log_file=log_file)
-    records.append(init_record)
-    generated = (
-        _latest_matching_file(
-            project.path / "build",
-            ("*.cdx.json", "bom.json", "application.cdx.json"),
-            modified_after=started_at,
+            + "\n",
+            encoding="utf-8",
         )
-        if (project.path / "build").exists()
-        else None
-    )
-    if init_record.returncode == 0 and generated:
-        return _copy_or_raise(generated, output_sbom), records
+        started_at = time.time()
+        init_command = [command[0], "--init-script", str(init_script), "cyclonedxBom"]
+        init_record, _, _ = run_command(init_command, cwd=project.path, log_file=log_file)
+        records.append(init_record)
+        generated = (
+            _latest_matching_file(
+                project.path / "build",
+                ("*.cdx.json", "bom.json", "application.cdx.json"),
+                modified_after=started_at,
+            )
+            if (project.path / "build").exists()
+            else None
+        )
+        if init_record.returncode == 0 and generated:
+            return _copy_or_raise(generated, output_sbom), records
     return None, records
 
 

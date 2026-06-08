@@ -149,18 +149,19 @@ Voi moi project/service:
    - .NET: `dotnet-CycloneDX <project> -j`; neu thieu tool va co `dotnet`, tool tu chay `dotnet tool install --global CycloneDX`.
    - Flutter/Python/Go/PHP/Ruby/unknown: fallback `trivy fs`
    - Neu generator rieng fail hoac khong tao ra SBOM moi, fallback `trivy fs --format cyclonedx`.
-4. Normalize license thanh `SBOM.cdx-fix.json`.
-5. Chay Trivy:
+4. Reconcile version trong SBOM voi version moi nhat tim duoc trong source/lock file hien co. Vi du Node co ca `package-lock.json` va `yarn.lock`, neu SBOM ra `1.80.0` nhung `package.json`/`yarn.lock` dang co `1.84.0`, tool se cap nhat SBOM len `1.84.0` truoc khi scan. Tool khong tu query registry de upgrade dependency ngoai source.
+5. Normalize license thanh `SBOM.cdx-fix.json`.
+6. Chay Trivy:
    - `report.json`: scan chung `vuln,license`
    - `license.json`: license-only JSON
    - `license.txt`: license-only TXT
    - `vuln.json`: vulnerability-only JSON
-6. Doi chieu license trong `SBOM.cdx-fix.json` voi `report.json`/`license.json`; neu Trivy tra thieu package license, tool tu bo sung tu SBOM. Component khong khai bao license se hien `LicenseRef-No-Declared-License` de khong bi mat im lang.
-7. Sinh:
+7. Doi chieu license trong `SBOM.cdx-fix.json` voi `report.json`/`license.json`; neu Trivy tra thieu package license, tool tu bo sung tu SBOM. Component khong khai bao license se hien `LicenseRef-No-Declared-License` de khong bi mat im lang.
+8. Sinh:
    - `report.html`
    - `report-vuln.html`
-8. Merge tat ca service thanh `consolidated-report.html`.
-9. Sinh `debug-report.md/json` de doi chieu voi document va debug tung service.
+9. Merge tat ca service thanh `consolidated-report.html`.
+10. Sinh `debug-report.md/json` de doi chieu voi document va debug tung service.
 
 ## Doi chieu voi document ITS
 
@@ -246,6 +247,7 @@ Trong file debug, kiem tra theo thu tu:
 - `Document Coverage`: case nao dang covered, case nao khac document co chu dich, case nao excluded.
 - `Services`: service nao duoc detect, kind gi, marker nao, SBOM tao bang generator nao.
 - `Commands`: command thuc te da chay va exit code.
+- `Version updates`: so component trong SBOM duoc nang len version moi hon tim thay trong source/lock file.
 - `fixed components`: so component trong `SBOM.cdx-fix.json`; neu so nay da thieu thi loi nam o buoc tao SBOM.
 - `SBOM license rows` va `Trivy licenses`: neu SBOM co du license rows nhung Trivy thieu, tool se backfill vao report.
 
@@ -322,7 +324,9 @@ Trong Excel:
 - Tool khong tu sua source code mac dinh.
 - Gradle: tool uu tien `cyclonedxBom` neu task/plugin da co. Neu thieu plugin, tool tao init script tam trong folder output de apply CycloneDX plugin theo document; khong sua `build.gradle.kts`.
 - Node.js: neu co `package-lock.json`/`npm-shrinkwrap.json`, tool dung `cyclonedx-npm --package-lock-only` de khong phu thuoc `node_modules`. Neu la yarn/pnpm/bun, tool fallback `trivy fs` de doc lock file tuong ung. Neu khong co lock file va cung khong co `node_modules`, report chi co the dua tren thong tin Trivy doc duoc tu source; nen commit lock file de scan du dependency hon.
+- Node.js co nhieu lock file: tool reconcile SBOM theo version cao nhat tim duoc trong `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, va `yarn.lock` de tranh lock file cu lam report ra version thap hon source hien tai.
 - Frontend monorepo/workspace: tool se tiep tuc tim project con trong `apps/`, `packages/`, `frontend/`, ... thay vi dung o `package.json` cap cha.
+- Flutter mobile: tool scan root Flutter va bo qua cac folder platform `android`, `ios`, `web`, `windows`, `linux`, `macos` nhu project rieng de tranh report trung/lap version tu thu muc con. Package Flutter trong `packages/` van duoc detect rieng neu co `pubspec.yaml`.
 - Maven/Gradle/.NET co the tao file trong `target/`, `build/`, hoac output SBOM theo co che cua tool goc.
 - Tat ca command duoc chay bang argument list, khong dung shell string concat.
 

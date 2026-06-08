@@ -10,6 +10,7 @@ from .reporting.reports import generate_single_report
 from .sbom_generator import SbomGenerationError, generate_sbom
 from .trivy_runner import TrivyScanError, scan_sbom
 from .utils import ensure_dir
+from .version_reconciler import reconcile_sbom_versions
 
 
 def scan_project(project: Project | Path, output_dir: Path, trivy_only: bool = False, dry_run: bool = False) -> ScanResult:
@@ -49,6 +50,8 @@ def scan_project(project: Project | Path, output_dir: Path, trivy_only: bool = F
         result.commands.extend(sbom_commands)
         result.debug["sbom_status"] = sbom_status
         result.debug["sbom_path"] = str(sbom)
+        version_reconcile_stats = reconcile_sbom_versions(project, sbom, log_file)
+        result.debug["version_reconcile_stats"] = version_reconcile_stats
 
         fixed_sbom = output_dir / "SBOM.cdx-fix.json"
         license_log = output_dir / "license-normalize.log"

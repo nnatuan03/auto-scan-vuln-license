@@ -5,6 +5,16 @@ from pathlib import Path
 from .config import IGNORE_DIR_NAMES, PROJECT_MARKERS
 from .models import Project
 
+FLUTTER_PLATFORM_DIR_NAMES = {
+    ".dart_tool",
+    "android",
+    "ios",
+    "linux",
+    "macos",
+    "web",
+    "windows",
+}
+
 
 def _has_suffix_marker(path: Path, suffix: str) -> list[str]:
     return [p.name for p in path.iterdir() if p.is_file() and p.name.endswith(suffix)]
@@ -56,16 +66,20 @@ def discover_projects(root: Path, recursive_depth: int = 3) -> list[Project]:
         if child.is_dir() and not child.is_symlink() and child.name not in IGNORE_DIR_NAMES
     ]
 
-    def walk(path: Path, depth: int) -> None:
+    def walk(path: Path, depth: int, skip_child_names: set[str] | None = None) -> None:
         if depth > recursive_depth:
             return
+        skip_child_names = skip_child_names or set()
         for child in sorted(path.iterdir()):
-            if child.is_symlink() or not child.is_dir() or child.name in IGNORE_DIR_NAMES:
+            if child.is_symlink() or not child.is_dir() or child.name in IGNORE_DIR_NAMES or child.name in skip_child_names:
                 continue
             project = detect_project(child)
+            nested_skip: set[str] | None = None
             if project:
                 found[project.path] = project
-            walk(child, depth + 1)
+                if project.kind == "flutter":
+                    nested_skip = FLUTTER_PLATFORM_DIR_NAMES
+            walk(child, depth + 1, nested_skip)
 
     walk(root, 1)
     if direct is None:

@@ -356,7 +356,7 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
         "",
     ])
     lines.extend(_markdown_table(
-        ["Service", "Kind", "Status", "SBOM", "Fixed components", "SBOM license rows", "Trivy licenses", "Markers"],
+        ["Service", "Kind", "Status", "SBOM", "Fixed components", "Version updates", "SBOM license rows", "Trivy licenses", "Markers"],
         [
             [
                 service["name"],
@@ -364,6 +364,7 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
                 service["status"],
                 service["sbom_status"],
                 service["counts"]["fixed_sbom"].get("components_total", "-"),
+                (service["internal_debug"].get("version_reconcile_stats") or {}).get("updated_components", "-"),
                 service["counts"].get("license_rows_from_fixed_sbom", "-"),
                 service["counts"]["report_json"].get("licenses", "-"),
                 ", ".join(service["markers"]) or "-",
@@ -385,6 +386,19 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
             f"- Scan log: `{service['paths']['scan_log']}`",
             f"- License normalize log: `{service['paths']['license_normalize_log']}`",
         ])
+        version_stats = service["internal_debug"].get("version_reconcile_stats") or {}
+        if version_stats and (version_stats.get("candidate_packages") or version_stats.get("updated_components")):
+            lines.append(
+                "- Version reconcile: "
+                f"`{version_stats.get('updated_components', 0)}` updated component(s), "
+                f"`{version_stats.get('candidate_packages', 0)}` candidate package(s)"
+            )
+            for item in (version_stats.get("updates") or [])[:10]:
+                lines.append(
+                    f"  - `{item.get('package')}`: "
+                    f"`{item.get('from')}` -> `{item.get('to')}` "
+                    f"from `{item.get('source')}`"
+                )
         if service["errors"]:
             lines.append(f"- Errors: `{'; '.join(service['errors'])}`")
 
