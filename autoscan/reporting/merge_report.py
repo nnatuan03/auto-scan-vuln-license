@@ -137,12 +137,23 @@ def load_all_reports(be_dir):
 
 
 def group_vulns(vuln_rows):
-    groups = defaultdict(lambda: {"folders": [], "severities": [], "rows": []})
+    groups = defaultdict(lambda: {"folders": [], "severities": [], "rows": [], "_seen": set()})
     for r in vuln_rows:
         key = r["pkg"]
         g = groups[key]
         if r["folder"] not in g["folders"]:
             g["folders"].append(r["folder"])
+        # Dedupe exact (CVE, severity, version, fixed) combos per package so the
+        # same CVE coming from multiple folders is only kept once.
+        dedup_key = (
+            r.get("cve", ""),
+            r.get("severity", "UNKNOWN"),
+            r.get("version", ""),
+            r.get("fixed", ""),
+        )
+        if dedup_key in g["_seen"]:
+            continue
+        g["_seen"].add(dedup_key)
         g["severities"].append(r["severity"])
         g["rows"].append(r)
 
