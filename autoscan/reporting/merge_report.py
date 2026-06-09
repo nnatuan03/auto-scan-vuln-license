@@ -173,12 +173,18 @@ def group_vulns(vuln_rows):
 
 
 def group_licenses(lic_rows):
-    groups = defaultdict(lambda: {"folders": [], "severities": [], "rows": []})
+    groups = defaultdict(lambda: {"folders": [], "severities": [], "rows": [], "_seen": set()})
     for r in lic_rows:
         key = r["pkg"]
         g = groups[key]
         if r["folder"] not in g["folders"]:
             g["folders"].append(r["folder"])
+        # Dedupe exact (license, severity, category) combos per package so the
+        # same row coming from multiple folders is only kept once.
+        dedup_key = (r.get("license", ""), r.get("severity", "UNKNOWN"), r.get("category", ""))
+        if dedup_key in g["_seen"]:
+            continue
+        g["_seen"].add(dedup_key)
         g["severities"].append(r["severity"])
         g["rows"].append(r)
 
@@ -346,11 +352,21 @@ def generate_html(be_dir, output_html):
             so = ORDER.get(r["severity"], 99)
             group_bg = "grp-even" if (group_index % 2 == 0) else "grp-odd"
             licenses = r["licenses"]
-            license_lines = [lic_chip(lic.get("license", "")) for lic in licenses]
-            severity_lines = [sev_chip(lic.get("severity", "UNKNOWN")) for lic in licenses]
-            category_lines = [lic.get("category", "") or "-" for lic in licenses]
-            action_lines = []
+            # Dedupe by (license, severity, category) tuple so the same combo
+            # coming from multiple folders doesn't repeat as chips.
+            seen_combo = set()
+            unique_licenses = []
             for lic in licenses:
+                key = (lic.get("license", ""), lic.get("severity", "UNKNOWN"), lic.get("category", ""))
+                if key in seen_combo:
+                    continue
+                seen_combo.add(key)
+                unique_licenses.append(lic)
+            license_lines = [lic_chip(lic.get("license", "")) for lic in unique_licenses]
+            severity_lines = [sev_chip(lic.get("severity", "UNKNOWN")) for lic in unique_licenses]
+            category_lines = [lic.get("category", "") or "-" for lic in unique_licenses]
+            action_lines = []
+            for lic in unique_licenses:
                 action, color = get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))
                 action_lines.append(action_chip(action, color))
             severity_attr = ",".join(unique_values(lic.get("severity", "") for lic in licenses))
