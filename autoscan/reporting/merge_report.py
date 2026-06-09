@@ -847,14 +847,19 @@ function buildVulnSheet() {
       return;
     }
     const firstRow = rows.length; // 0-indexed
-    cves.forEach((cv, idx) => {
+    cves.forEach((cv) => {
+      // Always write Package and Affected Services on every row, even when
+      // they will be visually merged. Empty cells trigger "downstream merge"
+      // in newer Excel for Mac, which concatenates sibling cells sideways
+      // (e.g. "HIGHMEDIUM"). xlsx-js-style's !merges hides the duplicate
+      // values in the rendered merged area while keeping the data intact.
       rows.push([
-        idx === 0 ? g.pkg : '',
+        g.pkg,
         cv.cve || '-',
         cv.severity || '-',
         cv.version || '-',
         cv.fixed || '-',
-        idx === 0 ? folders : '',
+        folders,
         cv.title || '-',
       ]);
     });
@@ -895,7 +900,7 @@ function buildLicSheet() {
       return;
     }
     const firstRow = rows.length;
-    lics.forEach((lc, idx) => {
+    lics.forEach((lc) => {
       const sev = String(lc.severity || '').toUpperCase();
       const cat = String(lc.category || '').toLowerCase();
       const name = String(lc.license || '');
@@ -903,13 +908,18 @@ function buildLicSheet() {
       if (['CRITICAL','HIGH'].includes(sev) || cat.includes('restricted') || cat.includes('forbidden')) action = 'Replace';
       else if (['MEDIUM','LOW'].includes(sev) || cat.includes('reciprocal') || cat.includes('notice')) action = 'Review';
       else if (name.startsWith('LicenseRef-') || sev === 'UNKNOWN' || !cat || cat === 'unknown') action = 'Review';
+      // Always write Package and Affected Services on every row, even when
+      // they will be visually merged. Empty cells trigger "downstream merge"
+      // in newer Excel for Mac, which concatenates sibling cells sideways
+      // (e.g. "HIGHMEDIUM"). xlsx-js-style's !merges hides the duplicate
+      // values in the rendered merged area while keeping the data intact.
       rows.push([
-        idx === 0 ? g.pkg : '',
+        g.pkg,
         lc.license || '-',
         lc.severity || 'UNKNOWN',
         lc.category || '-',
         action,
-        idx === 0 ? folders : '',
+        folders,
       ]);
     });
     const lastRow = rows.length - 1;
