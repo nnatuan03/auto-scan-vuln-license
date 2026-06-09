@@ -143,14 +143,12 @@ def group_vulns(vuln_rows):
         g = groups[key]
         if r["folder"] not in g["folders"]:
             g["folders"].append(r["folder"])
-        # Dedupe exact (CVE, severity, version, fixed) combos per package so the
-        # same CVE coming from multiple folders is only kept once.
-        dedup_key = (
-            r.get("cve", ""),
-            r.get("severity", "UNKNOWN"),
-            r.get("version", ""),
-            r.get("fixed", ""),
-        )
+        # Dedupe by (CVE, version) per package. A CVE affecting the same package
+        # version across multiple folders is the same vulnerability instance,
+        # so we keep only one row. Two different versions of the same package
+        # hit by the same CVE are kept as separate rows.
+        version = (r.get("version") or "").strip() or "-"
+        dedup_key = (r.get("cve", ""), version)
         if dedup_key in g["_seen"]:
             continue
         g["_seen"].add(dedup_key)
