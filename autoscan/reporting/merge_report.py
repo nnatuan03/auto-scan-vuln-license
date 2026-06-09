@@ -838,52 +838,101 @@ function styleMergedCell(ws, col, startRow, endRow) {
 
 function buildVulnSheet() {
   const rows = [['Package','CVE ID','Severity','Installed Version','Fix To','Affected Services','Title']];
+  const merges = [];
   VULN_DATA.forEach(g => {
     const cves = [...g.vulns].sort((a,b) => sevRank(a.severity)-sevRank(b.severity));
-    rows.push([
-      g.pkg,
-      cves.map(cv => cv.cve).join('\\n'),
-      cves.map(cv => cv.severity).join('\\n'),
-      cves.map(cv => cv.version || '-').join('\\n'),
-      cves.map(cv => cv.fixed || '-').join('\\n'),
-      g.folders.join('\\n'),
-      cves.map(cv => cv.title || '-').join('\\n')
-    ]);
+    const folders = g.folders.join('\\n');
+    if (cves.length === 0) {
+      rows.push([g.pkg, '-', '-', '-', '-', folders, '-']);
+      return;
+    }
+    const firstRow = rows.length; // 0-indexed
+    cves.forEach((cv, idx) => {
+      rows.push([
+        idx === 0 ? g.pkg : '',
+        cv.cve || '-',
+        cv.severity || '-',
+        cv.version || '-',
+        cv.fixed || '-',
+        idx === 0 ? folders : '',
+        cv.title || '-',
+      ]);
+    });
+    const lastRow = rows.length - 1;
+    if (lastRow > firstRow) {
+      // Merge Package (col 0) and Affected Services (col 5) across the group
+      merges.push({ s: { r: firstRow, c: 0 }, e: { r: lastRow, c: 0 } });
+      merges.push({ s: { r: firstRow, c: 5 }, e: { r: lastRow, c: 5 } });
+    }
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws['!cols'] = [38,24,14,18,24,35,60].map(w=>({wch:w}));
+  ws['!merges'] = merges;
   applyHeader(ws, 7);
   applySeverityColors(ws, 2);
+  // Re-style merged Package/Affected-Services cells so the value sits centered
+  merges.forEach(m => {
+    if (m.s.c !== 0 && m.s.c !== 5) return;
+    const ref = colRef(m.s.c) + (m.s.r + 1);
+    if (ws[ref]) {
+      ws[ref].s = Object.assign({}, ws[ref].s, {
+        alignment: { vertical: 'center', wrapText: true }
+      });
+    }
+  });
   return ws;
 }
 
 function buildLicSheet() {
   const rows = [['Package','License','Severity','Category','Action','Affected Services']];
+  const merges = [];
   LIC_DATA.forEach(g => {
     const lics = [...g.licenses].sort((a,b) => sevRank(a.severity)-sevRank(b.severity));
-    rows.push([
-      g.pkg,
-      lics.map(lc => lc.license || '-').join('\\n'),
-      lics.map(lc => lc.severity || 'UNKNOWN').join('\\n'),
-      lics.map(lc => lc.category || '-').join('\\n'),
-      lics.map(lc => {
-        const sev = String(lc.severity || '').toUpperCase();
-        const cat = String(lc.category || '').toLowerCase();
-        const name = String(lc.license || '');
-        if (['CRITICAL','HIGH'].includes(sev) || cat.includes('restricted') || cat.includes('forbidden')) return 'Replace';
-        if (['MEDIUM','LOW'].includes(sev) || cat.includes('reciprocal') || cat.includes('notice')) return 'Review';
-        if (name.startsWith('LicenseRef-') || sev === 'UNKNOWN' || !cat || cat === 'unknown') return 'Review';
-        return 'OK';
-      }).join('\\n'),
-      g.folders.join('\\n')
-    ]);
+    const folders = g.folders.join('\\n');
+    if (lics.length === 0) {
+      rows.push([g.pkg, '-', '-', '-', '-', folders]);
+      return;
+    }
+    const firstRow = rows.length;
+    lics.forEach((lc, idx) => {
+      const sev = String(lc.severity || '').toUpperCase();
+      const cat = String(lc.category || '').toLowerCase();
+      const name = String(lc.license || '');
+      let action = 'OK';
+      if (['CRITICAL','HIGH'].includes(sev) || cat.includes('restricted') || cat.includes('forbidden')) action = 'Replace';
+      else if (['MEDIUM','LOW'].includes(sev) || cat.includes('reciprocal') || cat.includes('notice')) action = 'Review';
+      else if (name.startsWith('LicenseRef-') || sev === 'UNKNOWN' || !cat || cat === 'unknown') action = 'Review';
+      rows.push([
+        idx === 0 ? g.pkg : '',
+        lc.license || '-',
+        lc.severity || 'UNKNOWN',
+        lc.category || '-',
+        action,
+        idx === 0 ? folders : '',
+      ]);
+    });
+    const lastRow = rows.length - 1;
+    if (lastRow > firstRow) {
+      merges.push({ s: { r: firstRow, c: 0 }, e: { r: lastRow, c: 0 } });
+      merges.push({ s: { r: firstRow, c: 5 }, e: { r: lastRow, c: 5 } });
+    }
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws['!cols'] = [38,34,14,20,16,35].map(w=>({wch:w}));
+  ws['!merges'] = merges;
   applyHeader(ws, 6);
   applySeverityColors(ws, 2);
+  merges.forEach(m => {
+    if (m.s.c !== 0 && m.s.c !== 5) return;
+    const ref = colRef(m.s.c) + (m.s.r + 1);
+    if (ws[ref]) {
+      ws[ref].s = Object.assign({}, ws[ref].s, {
+        alignment: { vertical: 'center', wrapText: true }
+      });
+    }
+  });
   return ws;
 }
 
