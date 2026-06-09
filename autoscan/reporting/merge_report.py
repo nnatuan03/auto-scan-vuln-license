@@ -826,123 +826,69 @@ function applySeverityColors(ws, severityCol) {
   }
 }
 
-// Apply vertical-center alignment to a merged cell so the value sits in the middle
-function styleMergedCell(ws, col, startRow, endRow) {
-  const ref = colRef(col) + (startRow + 1);
-  if (ws[ref]) {
-    ws[ref].s = Object.assign({}, ws[ref].s, {
-      alignment: { vertical: 'center', wrapText: false }
-    });
-  }
+// One row per package, multi-value columns joined with newlines so each
+// package shows up as a single Excel row regardless of how many licenses /
+// CVEs it has. This is the layout that renders identically on Windows and
+// macOS Excel. (The previous version used !merges to stack rows, which
+// macOS Excel for Mac renders with stray blank rows and squished columns.)
+function actionForLicense(lc) {
+  const sev = String(lc.severity || '').toUpperCase();
+  const cat = String(lc.category || '').toLowerCase();
+  const name = String(lc.license || '');
+  if (['CRITICAL','HIGH'].includes(sev) || cat.includes('restricted') || cat.includes('forbidden')) return 'Replace';
+  if (['MEDIUM','LOW'].includes(sev) || cat.includes('reciprocal') || cat.includes('notice')) return 'Review';
+  if (name.startsWith('LicenseRef-') || sev === 'UNKNOWN' || !cat || cat === 'unknown') return 'Review';
+  return 'OK';
 }
 
 function buildVulnSheet() {
   const rows = [['Package','CVE ID','Severity','Installed Version','Fix To','Affected Services','Title']];
-  const merges = [];
   VULN_DATA.forEach(g => {
     const cves = [...g.vulns].sort((a,b) => sevRank(a.severity)-sevRank(b.severity));
-    const folders = g.folders.join('\\n');
     if (cves.length === 0) {
-      rows.push([g.pkg, '-', '-', '-', '-', folders, '-']);
+      rows.push([g.pkg, '-', '-', '-', '-', g.folders.join('\\n'), '-']);
       return;
     }
-    const firstRow = rows.length; // 0-indexed
-    cves.forEach((cv) => {
-      // Always write Package and Affected Services on every row, even when
-      // they will be visually merged. Empty cells trigger "downstream merge"
-      // in newer Excel for Mac, which concatenates sibling cells sideways
-      // (e.g. "HIGHMEDIUM"). xlsx-js-style's !merges hides the duplicate
-      // values in the rendered merged area while keeping the data intact.
-      rows.push([
-        g.pkg,
-        cv.cve || '-',
-        cv.severity || '-',
-        cv.version || '-',
-        cv.fixed || '-',
-        folders,
-        cv.title || '-',
-      ]);
-    });
-    const lastRow = rows.length - 1;
-    if (lastRow > firstRow) {
-      // Merge Package (col 0) and Affected Services (col 5) across the group
-      merges.push({ s: { r: firstRow, c: 0 }, e: { r: lastRow, c: 0 } });
-      merges.push({ s: { r: firstRow, c: 5 }, e: { r: lastRow, c: 5 } });
-    }
+    rows.push([
+      g.pkg,
+      cves.map(cv => cv.cve || '-').join('\\n'),
+      cves.map(cv => cv.severity || '-').join('\\n'),
+      cves.map(cv => cv.version || '-').join('\\n'),
+      cves.map(cv => cv.fixed || '-').join('\\n'),
+      g.folders.join('\\n'),
+      cves.map(cv => cv.title || '-').join('\\n'),
+    ]);
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws['!cols'] = [38,24,14,18,24,35,60].map(w=>({wch:w}));
-  ws['!merges'] = merges;
   applyHeader(ws, 7);
   applySeverityColors(ws, 2);
-  // Re-style merged Package/Affected-Services cells so the value sits centered
-  merges.forEach(m => {
-    if (m.s.c !== 0 && m.s.c !== 5) return;
-    const ref = colRef(m.s.c) + (m.s.r + 1);
-    if (ws[ref]) {
-      ws[ref].s = Object.assign({}, ws[ref].s, {
-        alignment: { vertical: 'center', wrapText: true }
-      });
-    }
-  });
   return ws;
 }
 
 function buildLicSheet() {
   const rows = [['Package','License','Severity','Category','Action','Affected Services']];
-  const merges = [];
   LIC_DATA.forEach(g => {
     const lics = [...g.licenses].sort((a,b) => sevRank(a.severity)-sevRank(b.severity));
-    const folders = g.folders.join('\\n');
     if (lics.length === 0) {
-      rows.push([g.pkg, '-', '-', '-', '-', folders]);
+      rows.push([g.pkg, '-', '-', '-', '-', g.folders.join('\\n')]);
       return;
     }
-    const firstRow = rows.length;
-    lics.forEach((lc) => {
-      const sev = String(lc.severity || '').toUpperCase();
-      const cat = String(lc.category || '').toLowerCase();
-      const name = String(lc.license || '');
-      let action = 'OK';
-      if (['CRITICAL','HIGH'].includes(sev) || cat.includes('restricted') || cat.includes('forbidden')) action = 'Replace';
-      else if (['MEDIUM','LOW'].includes(sev) || cat.includes('reciprocal') || cat.includes('notice')) action = 'Review';
-      else if (name.startsWith('LicenseRef-') || sev === 'UNKNOWN' || !cat || cat === 'unknown') action = 'Review';
-      // Always write Package and Affected Services on every row, even when
-      // they will be visually merged. Empty cells trigger "downstream merge"
-      // in newer Excel for Mac, which concatenates sibling cells sideways
-      // (e.g. "HIGHMEDIUM"). xlsx-js-style's !merges hides the duplicate
-      // values in the rendered merged area while keeping the data intact.
-      rows.push([
-        g.pkg,
-        lc.license || '-',
-        lc.severity || 'UNKNOWN',
-        lc.category || '-',
-        action,
-        folders,
-      ]);
-    });
-    const lastRow = rows.length - 1;
-    if (lastRow > firstRow) {
-      merges.push({ s: { r: firstRow, c: 0 }, e: { r: lastRow, c: 0 } });
-      merges.push({ s: { r: firstRow, c: 5 }, e: { r: lastRow, c: 5 } });
-    }
+    rows.push([
+      g.pkg,
+      lics.map(lc => lc.license || '-').join('\\n'),
+      lics.map(lc => lc.severity || 'UNKNOWN').join('\\n'),
+      lics.map(lc => lc.category || '-').join('\\n'),
+      lics.map(actionForLicense).join('\\n'),
+      g.folders.join('\\n'),
+    ]);
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws['!cols'] = [38,34,14,20,16,35].map(w=>({wch:w}));
-  ws['!merges'] = merges;
   applyHeader(ws, 6);
   applySeverityColors(ws, 2);
-  merges.forEach(m => {
-    if (m.s.c !== 0 && m.s.c !== 5) return;
-    const ref = colRef(m.s.c) + (m.s.r + 1);
-    if (ws[ref]) {
-      ws[ref].s = Object.assign({}, ws[ref].s, {
-        alignment: { vertical: 'center', wrapText: true }
-      });
-    }
-  });
   return ws;
 }
 
