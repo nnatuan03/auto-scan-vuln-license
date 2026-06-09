@@ -9,6 +9,7 @@ from typing import Any, Callable
 from .config import DEFAULT_RESULTS_DIR
 from .debug_report import write_debug_reports
 from .detector import discover_projects
+from .maven_prebuild import prebuild_internal_maven_projects
 from .models import Project, ScanResult
 from .reporting.reports import generate_merged_report
 from .scanner import scan_project
@@ -34,6 +35,7 @@ def scan_all(
     recursive_depth: int = 3,
     trivy_only: bool = False,
     dry_run: bool = False,
+    maven_prebuild: bool = True,
     progress_callback: ProgressCallback | None = None,
 ) -> tuple[Path, list[ScanResult], Path | None]:
     root = root.resolve()
@@ -51,7 +53,7 @@ def scan_all(
             "projects": projects,
         })
     if not projects:
-        debug_paths = write_debug_reports(root, run_dir, output_base, [], None, dry_run)
+        debug_paths = write_debug_reports(root, run_dir, output_base, [], None, dry_run, {})
         summary = {
             "root": str(root),
             "run_dir": str(run_dir),
@@ -72,6 +74,22 @@ def scan_all(
                 "debug_report": debug_paths["debug_report"],
             })
         return run_dir, [], None
+
+    if progress_callback:
+        progress_callback("prebuild_start", {
+            "projects": projects,
+        })
+    maven_prebuild_summary = prebuild_internal_maven_projects(
+        projects,
+        run_dir,
+        enabled=maven_prebuild,
+        dry_run=dry_run,
+        trivy_only=trivy_only,
+    )
+    if progress_callback:
+        progress_callback("prebuild_complete", {
+            "summary": maven_prebuild_summary,
+        })
 
     results: list[ScanResult] = []
     name_counts: dict[str, int] = {}
@@ -120,7 +138,7 @@ def scan_all(
         merged_report = generate_merged_report(services_dir, run_dir / "consolidated-report.html")
         shutil.copy2(merged_report, output_base / "consolidated-report.html")
 
-    debug_paths = write_debug_reports(root, run_dir, output_base, results, merged_report, dry_run)
+    debug_paths = write_debug_reports(root, run_dir, output_base, results, merged_report, dry_run, maven_prebuild_summary)
     summary = {
         "root": str(root),
         "run_dir": str(run_dir),
@@ -134,6 +152,7 @@ def scan_all(
         "ok": sum(1 for r in results if r.status == "OK"),
         "failed": sum(1 for r in results if r.status == "FAIL"),
         "dry_run": dry_run,
+        "maven_prebuild": maven_prebuild_summary,
         "projects": [r.to_json() for r in results],
     }
     write_json(run_dir / "scan-summary.json", summary)

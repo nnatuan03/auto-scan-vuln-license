@@ -4,6 +4,7 @@ param(
     [int]$MaxWorkers = 4,
     [int]$RecursiveDepth = 5,
     [switch]$TrivyOnly,
+    [switch]$SkipMavenPrebuild,
     [switch]$DryRun,
     [switch]$NoDashboard,
     [switch]$HideCommands,
@@ -40,6 +41,9 @@ if ($Output -ne "") {
 }
 if ($TrivyOnly) {
     $argsList += "--trivy-only"
+}
+if ($SkipMavenPrebuild) {
+    $argsList += "--skip-maven-prebuild"
 }
 if ($DryRun) {
     $argsList += "--dry-run"

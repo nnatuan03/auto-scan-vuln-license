@@ -50,8 +50,15 @@ class ProgressDashboard:
             self.completed = 0
             self.ok = 0
             self.failed = 0
-            self.current_stage = "scanning"
+            self.current_stage = "detecting"
             self._render("Scan started", projects=projects)
+        elif event == "prebuild_start":
+            self.current_stage = "maven prebuild"
+            self._render("Maven prebuild started")
+        elif event == "prebuild_complete":
+            summary = payload.get("summary") or {}
+            self.current_stage = "scanning"
+            self._render("Maven prebuild completed", prebuild=summary)
         elif event == "project_complete":
             result = payload["result"]
             self.completed = int(payload["completed"]) if "completed" in payload else self.completed + 1
@@ -84,6 +91,7 @@ class ProgressDashboard:
         *,
         projects: list[Project] | None = None,
         result: ScanResult | None = None,
+        prebuild: dict[str, Any] | None = None,
     ) -> None:
         elapsed = time.monotonic() - self.started_at
         percent = self.completed / self.total * 100.0 if self.total else 0.0
@@ -114,6 +122,17 @@ class ProgressDashboard:
         if projects:
             kinds = ", ".join(sorted({project.kind for project in projects}))
             lines.append(f"Detected : {len(projects)} project(s) [{kinds or '-'}]")
+        if prebuild:
+            lines.append(
+                "Prebuild : "
+                f"maven={prebuild.get('maven_projects', 0)} "
+                f"internal={len(prebuild.get('internal_build_projects') or [])} "
+                f"installed={colorize(str(len(prebuild.get('installed') or [])), 'green', stream=self.stream)} "
+                f"failed={colorize(str(len(prebuild.get('failed') or [])), 'red', stream=self.stream)} "
+                f"skipped={prebuild.get('skipped', False)}"
+            )
+            if prebuild.get("skip_reason"):
+                lines.append(f"Reason   : {prebuild.get('skip_reason')}")
         if result:
             lines.append(
                 "Last     : "

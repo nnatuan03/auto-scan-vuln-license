@@ -137,76 +137,78 @@ def load_all_reports(be_dir):
 
 
 def group_vulns(vuln_rows):
-    groups = defaultdict(lambda: {"folders": [], "severities": [], "row": None})
+    groups = defaultdict(lambda: {"folders": [], "severities": [], "rows": []})
     for r in vuln_rows:
-        key = (r["pkg"], r["cve"])
+        key = r["pkg"]
         g = groups[key]
         if r["folder"] not in g["folders"]:
             g["folders"].append(r["folder"])
         g["severities"].append(r["severity"])
-        if g["row"] is None:
-            g["row"] = r
+        g["rows"].append(r)
 
     result = []
-    for (pkg, cve), g in groups.items():
+    for pkg, g in groups.items():
         highest = get_highest_severity(g["severities"])
-        r = g["row"]
         result.append({
-            "pkg":     pkg,
-            "cve":     cve,
-            "severity":highest,
-            "version": r["version"],
-            "fixed":   r["fixed"],
-            "title":   r["title"],
-            "url":     r["url"],
+            "pkg": pkg,
+            "severity": highest,
+            "versions": sorted({r["version"] for r in g["rows"] if r.get("version")}),
+            "fixed_versions": sorted({r["fixed"] for r in g["rows"] if r.get("fixed") and r.get("fixed") != "-"}),
             "folders": sorted(g["folders"]),
+            "vulns": sorted(
+                g["rows"],
+                key=lambda r: (
+                    SEVERITY_ORDER.get(r["severity"], 99),
+                    str(r.get("cve") or "").lower(),
+                    str(r.get("folder") or "").lower(),
+                ),
+            ),
         })
-    pkg_counts = defaultdict(int)
-    for r in result:
-        pkg_counts[r["pkg"]] += 1
     result.sort(key=lambda x: (
-        0 if pkg_counts[x["pkg"]] > 1 else 1,
+        0 if len(x["vulns"]) > 1 else 1,
         SEVERITY_ORDER.get(x["severity"], 99),
         x["pkg"].lower(),
-        x["cve"].lower(),
     ))
     return result
 
 
 def group_licenses(lic_rows):
-    groups = defaultdict(lambda: {"folders": [], "severities": [], "row": None})
+    groups = defaultdict(lambda: {"folders": [], "severities": [], "rows": []})
     for r in lic_rows:
-        key = (r["pkg"], r["license"])
+        key = r["pkg"]
         g = groups[key]
         if r["folder"] not in g["folders"]:
             g["folders"].append(r["folder"])
         g["severities"].append(r["severity"])
-        if g["row"] is None:
-            g["row"] = r
+        g["rows"].append(r)
 
     result = []
-    for (pkg, license_name), g in groups.items():
+    for pkg, g in groups.items():
         highest = get_highest_severity(g["severities"])
-        r = g["row"]
-        action, action_color = get_license_action(highest, r.get("category", ""), license_name)
+        license_names = sorted({r["license"] for r in g["rows"] if r.get("license")})
+        categories = sorted({r["category"] for r in g["rows"] if r.get("category")})
+        action, action_color = get_license_action(highest, ",".join(categories), ",".join(license_names))
         result.append({
-            "pkg":          pkg,
-            "license":      license_name,
-            "severity":     highest,
-            "category":     r.get("category", ""),
-            "filepath":     r.get("filepath", "-"),
-            "action":       action,
+            "pkg": pkg,
+            "license_names": license_names,
+            "severity": highest,
+            "categories": categories,
+            "action": action,
             "action_color": action_color,
-            "folders":      sorted(g["folders"]),
+            "folders": sorted(g["folders"]),
+            "licenses": sorted(
+                g["rows"],
+                key=lambda r: (
+                    SEVERITY_ORDER.get(r["severity"], 99),
+                    str(r.get("license") or "").lower(),
+                    str(r.get("folder") or "").lower(),
+                ),
+            ),
         })
-    pkg_counts = defaultdict(int)
-    for r in result:
-        pkg_counts[r["pkg"]] += 1
     result.sort(key=lambda x: (
-        0 if pkg_counts[x["pkg"]] > 1 else 1,
+        0 if len(x["licenses"]) > 1 else 1,
         SEVERITY_ORDER.get(x["severity"], 99),
         x["pkg"].lower(),
-        x["license"].lower(),
     ))
     return result
 
@@ -233,6 +235,32 @@ def lic_chip(name):
 
 def action_chip(action, color):
     return '<span class="action-chip" style="color:{0};border-color:{0}50;background:{0}10">{1}</span>'.format(color, action)
+
+
+def line_stack(items):
+    values = [str(item) for item in items if str(item or "").strip()]
+    if not values:
+        values = ["-"]
+    return '<div class="line-stack">' + "".join("<div>{0}</div>".format(escape(value)) for value in values) + "</div>"
+
+
+def html_line_stack(items):
+    values = [str(item) for item in items if str(item or "").strip()]
+    if not values:
+        values = ["-"]
+    return '<div class="line-stack">' + "".join("<div>{0}</div>".format(value) for value in values) + "</div>"
+
+
+def unique_values(items):
+    values = []
+    seen = set()
+    for item in items:
+        value = str(item or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        values.append(value)
+    return values
 
 
 def paths_html(folders, max_show=4):
@@ -270,84 +298,78 @@ def generate_html(be_dir, output_html):
 
     def vuln_table_rows():
         rows = ""
-        from collections import Counter
-        pkg_counts = Counter(r["pkg"] for r in vuln_groups)
         sorted_vulns = sorted(vuln_groups, key=lambda x: (
-            0 if pkg_counts[x["pkg"]] > 1 else 1,
+            0 if len(x["vulns"]) > 1 else 1,
             ORDER.get(x["severity"], 99),
             x["pkg"].lower(),
-            x["cve"].lower(),
         ))
-        prev_pkg = None
-        group_index = -1
-        pos_in_group = 0
-        for r in sorted_vulns:
+        for group_index, r in enumerate(sorted_vulns):
             so = ORDER.get(r["severity"], 99)
-            is_new_group = (r["pkg"] != prev_pkg)
-            if is_new_group:
-                group_index += 1
-                pos_in_group = 0
-            else:
-                pos_in_group += 1
-            prev_pkg = r["pkg"]
-
-            group_size = pkg_counts[r["pkg"]]
-            is_last_in_group = (pos_in_group == group_size - 1)
-
-            pkg_display = r["pkg"] if is_new_group else ""
-            ver_display = r["version"] if is_new_group else ""
             group_bg = "grp-even" if (group_index % 2 == 0) else "grp-odd"
-            border_cls = "grp-end" if is_last_in_group else "grp-mid"
-
-            rows += '<tr class="data-row lic-grp {10} {11}" data-severity="{0}" data-pkg="{12}"><td class="pkg-name">{1}</td><td><a href="{2}" target="_blank" class="cve-link">{3}</a></td><td data-value="{4}">{5}</td><td>{6}</td><td><span class="fix-version">{7}</span></td><td>{8}</td><td style="color:#4a5568;font-size:12px;max-width:280px">{9}</td></tr>'.format(
-                r["severity"], pkg_display, r["url"], r["cve"], so,
-                sev_chip(r["severity"]),
-                ('<span class="version-tag">' + ver_display + '</span>' if ver_display else ""),
-                r["fixed"],
-                paths_html(r["folders"]), r["title"][:100],
-                group_bg, border_cls, r["pkg"]
+            vulns = r["vulns"]
+            cve_lines = [
+                '<a href="{0}" target="_blank" class="cve-link">{1}</a>'.format(
+                    escape(v.get("url", "")),
+                    escape(v.get("cve", "")),
+                )
+                for v in vulns
+            ]
+            severity_lines = [sev_chip(v["severity"]) for v in vulns]
+            version_lines = unique_values(v.get("version", "") for v in vulns)
+            fixed_lines = [v.get("fixed") or "-" for v in vulns]
+            title_lines = [str(v.get("title") or "")[:120] for v in vulns]
+            severity_attr = ",".join(unique_values(v.get("severity", "") for v in vulns))
+            rows += '<tr class="data-row lic-grp {8} grp-end" data-severity="{0}" data-severities="{9}" data-pkg="{10}"><td class="pkg-name">{1}</td><td>{2}</td><td data-value="{3}">{4}</td><td>{5}</td><td>{6}</td><td>{7}</td><td style="color:#4a5568;font-size:12px;max-width:360px">{11}</td></tr>'.format(
+                r["severity"],
+                escape(r["pkg"]),
+                html_line_stack(cve_lines),
+                so,
+                html_line_stack(severity_lines),
+                line_stack(version_lines),
+                line_stack(fixed_lines),
+                paths_html(r["folders"]),
+                group_bg,
+                escape(severity_attr),
+                escape(r["pkg"]),
+                line_stack(title_lines),
             )
         return rows or '<tr><td colspan="7" class="no-data">No vulnerabilities found.</td></tr>'
 
     def lic_table_rows():
         rows = ""
-        # Pre-count group sizes to know first/last row of each package group
-        from collections import Counter
-        pkg_counts = Counter(r["pkg"] for r in lic_groups)
         sorted_lics = sorted(lic_groups, key=lambda x: (
-            0 if pkg_counts[x["pkg"]] > 1 else 1,
+            0 if len(x["licenses"]) > 1 else 1,
             ORDER.get(x["severity"], 99),
             x["pkg"].lower(),
-            x["license"].lower(),
         ))
-        prev_pkg = None
-        group_index = -1
-        pos_in_group = 0
-        for idx, r in enumerate(sorted_lics):
+        for group_index, r in enumerate(sorted_lics):
             so = ORDER.get(r["severity"], 99)
-            is_new_group = (r["pkg"] != prev_pkg)
-            if is_new_group:
-                group_index += 1
-                pos_in_group = 0
-            else:
-                pos_in_group += 1
-            prev_pkg = r["pkg"]
-
-            group_size = pkg_counts[r["pkg"]]
-            is_last_in_group = (pos_in_group == group_size - 1)
-
-            pkg_display = r["pkg"] if is_new_group else ""
-            # Alternating background per GROUP (not per row)
             group_bg = "grp-even" if (group_index % 2 == 0) else "grp-odd"
-            # Border only on the last row of each group (so inner rows look merged)
-            border_cls = "grp-end" if is_last_in_group else "grp-mid"
-
-            rows += '<tr class="data-row lic-grp {9} {10}" data-severity="{0}" data-pkg="{8}"><td class="pkg-name">{1}</td><td>{2}</td><td data-value="{3}">{4}</td><td style="font-size:12px;color:#4a5568">{5}</td><td>{6}</td><td>{7}</td></tr>'.format(
-                r["severity"], pkg_display, lic_chip(r["license"]), so,
-                sev_chip(r["severity"]), r["category"],
-                action_chip(r["action"], r["action_color"]),
+            licenses = r["licenses"]
+            license_lines = [lic_chip(lic.get("license", "")) for lic in licenses]
+            severity_lines = [sev_chip(lic.get("severity", "UNKNOWN")) for lic in licenses]
+            category_lines = [lic.get("category", "") or "-" for lic in licenses]
+            action_lines = []
+            for lic in licenses:
+                action, color = get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))
+                action_lines.append(action_chip(action, color))
+            severity_attr = ",".join(unique_values(lic.get("severity", "") for lic in licenses))
+            category_attr = ",".join(unique_values(lic.get("category", "") for lic in licenses))
+            action_attr = ",".join(unique_values(get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))[0] for lic in licenses))
+            rows += '<tr class="data-row lic-grp {9} grp-end" data-severity="{0}" data-severities="{10}" data-categories="{11}" data-actions="{12}" data-pkg="{8}"><td class="pkg-name">{1}</td><td>{2}</td><td data-value="{3}">{4}</td><td style="font-size:12px;color:#4a5568">{5}</td><td>{6}</td><td>{7}</td></tr>'.format(
+                r["severity"],
+                escape(r["pkg"]),
+                html_line_stack(license_lines),
+                so,
+                html_line_stack(severity_lines),
+                line_stack(category_lines),
+                html_line_stack(action_lines),
                 paths_html(r["folders"]),
-                r["pkg"], group_bg, border_cls
+                escape(r["pkg"]),
+                group_bg,
+                escape(severity_attr),
+                escape(category_attr),
+                escape(action_attr),
             )
         return rows or '<tr><td colspan="6" class="no-data">No license issues found.</td></tr>'
 
@@ -356,7 +378,7 @@ def generate_html(be_dir, output_html):
 
     metrics = ""
     for sev in ["CRITICAL", "HIGH", "MEDIUM", "LOW"]:
-        metrics += metric_card(sev, vuln_sev.get(sev, 0), "CVEs", SEV_COLOR[sev])
+        metrics += metric_card(sev, vuln_sev.get(sev, 0), "packages", SEV_COLOR[sev])
     metrics += metric_card("SERVICES", len(folders_found), "scanned", "#3182ce")
     metrics += metric_card("REPLACE",  sum(1 for g in lic_groups if g["action"] == "Replace"), "licenses", "#e53e3e")
     metrics += metric_card("REVIEW",   sum(1 for g in lic_groups if g["action"] == "Review"),  "licenses", "#dd8500")
@@ -370,7 +392,7 @@ def generate_html(be_dir, output_html):
     lic_stats  = "".join(stat_block(s, lic_sev.get(s,0),  "lic",  "licSevFilter",  "filterLic")  for s in ["CRITICAL","HIGH","MEDIUM","LOW"])
     vuln_stats = "".join(stat_block(s, vuln_sev.get(s,0), "vuln", "vulnSevFilter", "filterVuln") for s in ["CRITICAL","HIGH","MEDIUM","LOW"])
 
-    all_cats = sorted(set(g["category"] for g in lic_groups if g["category"]))
+    all_cats = sorted({cat for g in lic_groups for cat in g.get("categories", []) if cat})
     cat_options = "\n".join('<option value="{0}">{0}</option>'.format(c) for c in all_cats)
 
     services_rows = "".join(
@@ -480,6 +502,8 @@ def generate_html(be_dir, output_html):
   .path-item{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#4a5568;background:#f5f8fc;border:1px solid #dde8f2;border-radius:3px;padding:1px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px}
   .path-more{font-size:11px;color:#2563eb;cursor:pointer;padding:1px 4px;user-select:none}
   .path-more:hover{text-decoration:underline}
+  .line-stack{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+  .line-stack>div{min-height:20px;line-height:1.45}
   .summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:4px}
   .summary-block{background:#fff;border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
   .summary-block-header{background:var(--navy-900);padding:14px 20px;border-bottom:1px solid var(--navy-700)}
@@ -530,14 +554,14 @@ def generate_html(be_dir, output_html):
       <div class="summary-block">
         <div class="summary-block-header">
           <div class="summary-block-title">License Scan Results</div>
-          <div class="summary-block-desc">Unique package-license combinations across all services</div>
+          <div class="summary-block-desc">Package rows with license details grouped in each row</div>
         </div>
         <div class="summary-block-body">""" + lic_stats + """</div>
       </div>
       <div class="summary-block">
         <div class="summary-block-header">
           <div class="summary-block-title">Vulnerability Scan Results</div>
-          <div class="summary-block-desc">Unique CVEs across all services</div>
+          <div class="summary-block-desc">Package rows with CVE details grouped in each row</div>
         </div>
         <div class="summary-block-body">""" + vuln_stats + """</div>
       </div>
@@ -547,7 +571,7 @@ def generate_html(be_dir, output_html):
   <div class="tab-panel" id="tab-vuln">
     <div class="section-header">
       <span class="section-title">Vulnerabilities</span>
-      <span class="section-desc">""" + str(len(vuln_groups)) + """ unique CVEs &mdash; Affected Services shows which services are impacted</span>
+      <span class="section-desc">""" + str(len(vuln_groups)) + """ package rows &mdash; CVEs, severities, fixes, and titles are grouped per package</span>
     </div>
     <div class="toolbar">
       <input class="search-input" type="text" id="vulnSearch" placeholder="Filter by package, CVE, title..." oninput="filterVuln()">
@@ -558,7 +582,7 @@ def generate_html(be_dir, output_html):
       <button class="btn btn-ghost" onclick="resetVuln()">Reset</button>
       <div class="toolbar-right">
         <button class="btn btn-success" onclick="exportExcel()">Export Excel</button>
-        <span class="row-count" id="vulnCount">""" + str(len(vuln_groups)) + """ CVEs</span>
+        <span class="row-count" id="vulnCount">""" + str(len(vuln_groups)) + """ packages</span>
       </div>
     </div>
     <div class="table-wrap"><div class="table-scroll">
@@ -580,7 +604,7 @@ def generate_html(be_dir, output_html):
   <div class="tab-panel" id="tab-lic">
     <div class="section-header">
       <span class="section-title">Licenses</span>
-      <span class="section-desc">""" + str(len(lic_groups)) + """ unique package-license combinations</span>
+      <span class="section-desc">""" + str(len(lic_groups)) + """ package rows &mdash; licenses, severities, categories, and actions are grouped per package</span>
     </div>
     <div class="legend-bar">
       <span class="legend-label">License Type</span>
@@ -607,7 +631,7 @@ def generate_html(be_dir, output_html):
       <button class="btn btn-ghost" onclick="resetLic()">Reset</button>
       <div class="toolbar-right">
         <button class="btn btn-success" onclick="exportExcel()">Export Excel</button>
-        <span class="row-count" id="licCount">""" + str(len(lic_groups)) + """ licenses</span>
+        <span class="row-count" id="licCount">""" + str(len(lic_groups)) + """ packages</span>
       </div>
     </div>
     <div class="table-wrap"><div class="table-scroll">
@@ -683,11 +707,12 @@ function filterVuln() {
   let c = 0;
   document.querySelectorAll('#vulnBody tr').forEach(tr => {
     const text = (tr.innerText + ' ' + (tr.dataset.pkg || '')).toLowerCase();
-    const show = (!q || text.includes(q)) && (!sev || tr.dataset.severity === sev);
+    const severities = tr.dataset.severities || tr.dataset.severity || '';
+    const show = (!q || text.includes(q)) && (!sev || severities.split(',').includes(sev));
     tr.classList.toggle('hidden', !show);
     if (show) c++;
   });
-  document.getElementById('vulnCount').textContent = c + ' CVEs';
+  document.getElementById('vulnCount').textContent = c + ' packages';
 }
 
 function filterLic() {
@@ -699,11 +724,14 @@ function filterLic() {
   document.querySelectorAll('#licBody tr').forEach(tr => {
     // Include data-pkg so rows with blank package cell (grouped) still match search
     const text = (tr.innerText + ' ' + (tr.dataset.pkg || '')).toLowerCase();
-    const show = (!q||text.includes(q)) && (!sev||tr.dataset.severity===sev) && (!cat||text.includes(cat.toLowerCase())) && (!act||text.includes(act.toLowerCase()));
+    const severities = tr.dataset.severities || tr.dataset.severity || '';
+    const categories = (tr.dataset.categories || '').toLowerCase().split(',');
+    const actions = (tr.dataset.actions || '').toLowerCase().split(',');
+    const show = (!q||text.includes(q)) && (!sev||severities.split(',').includes(sev)) && (!cat||categories.includes(cat.toLowerCase())) && (!act||actions.includes(act.toLowerCase()));
     tr.classList.toggle('hidden', !show);
     if (show) c++;
   });
-  document.getElementById('licCount').textContent = c + ' licenses';
+  document.getElementById('licCount').textContent = c + ' packages';
 }
 
 function resetVuln() { document.getElementById('vulnSearch').value=''; document.getElementById('vulnSevFilter').value=''; filterVuln(); }
@@ -749,7 +777,7 @@ function applyHeader(ws, totalCols) {
     ws[ref].s = {
       fill:{ fgColor:{ rgb:'0D1629' } },
       font:{ bold:true, color:{ rgb:'B8CCE0' }, sz:10 },
-      alignment:{ vertical:'center', horizontal:'center' }
+      alignment:{ vertical:'center', horizontal:'center', wrapText:true }
     };
   }
   ws['!sheetView'] = [{ state:'frozen', ySplit:1 }];
@@ -762,7 +790,7 @@ function applySeverityColors(ws, severityCol) {
     const ref = colRef(severityCol) + (r + 1);
     const cell = ws[ref];
     if (!cell) continue;
-    const style = SEVERITY_STYLES[String(cell.v || '').toUpperCase()];
+    const style = SEVERITY_STYLES[String(cell.v || '').toUpperCase().split('\\n')[0]];
     if (!style) continue;
     const current = cell.s || {};
     cell.s = Object.assign({}, current, {
@@ -785,75 +813,51 @@ function styleMergedCell(ws, col, startRow, endRow) {
 
 function buildVulnSheet() {
   const rows = [['Package','CVE ID','Severity','Installed Version','Fix To','Affected Services','Title']];
-  const merges = [];
-  const byPkg = {};
-  VULN_DATA.forEach(r => { if(!byPkg[r.pkg]) byPkg[r.pkg]=[]; byPkg[r.pkg].push(r); });
-
-  let rowIdx = 1; // data starts at row index 1 (0-based), after header
-  sortedPackagesByMergedFirst(byPkg).forEach(pkg => {
-    const cves = byPkg[pkg];
-    cves.sort((a,b) => sevRank(a.severity)-sevRank(b.severity));
-    const start = rowIdx;
-    cves.forEach((cv, i) => {
-      // Only first row of group carries package + version; others blank for merge
-      rows.push([
-        i === 0 ? cv.pkg : '',
-        cv.cve, cv.severity,
-        i === 0 ? cv.version : '',
-        cv.fixed || '-',
-        cv.folders.join('\\n'),
-        cv.title
-      ]);
-      rowIdx++;
-    });
-    const end = rowIdx - 1;
-    if (end > start) {
-      // Merge Package (col 0) and Installed Version (col 3) vertically
-      merges.push({ s:{r:start,c:0}, e:{r:end,c:0} });
-      merges.push({ s:{r:start,c:3}, e:{r:end,c:3} });
-    }
+  VULN_DATA.forEach(g => {
+    const cves = [...g.vulns].sort((a,b) => sevRank(a.severity)-sevRank(b.severity));
+    rows.push([
+      g.pkg,
+      cves.map(cv => cv.cve).join('\\n'),
+      cves.map(cv => cv.severity).join('\\n'),
+      cves.map(cv => cv.version || '-').join('\\n'),
+      cves.map(cv => cv.fixed || '-').join('\\n'),
+      g.folders.join('\\n'),
+      cves.map(cv => cv.title || '-').join('\\n')
+    ]);
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [38,22,10,16,20,35,55].map(w=>({wch:w}));
-  ws['!merges'] = merges;
+  ws['!cols'] = [38,24,14,18,24,35,60].map(w=>({wch:w}));
   applyHeader(ws, 7);
-  merges.forEach(m => styleMergedCell(ws, m.s.c, m.s.r, m.e.r));
   applySeverityColors(ws, 2);
   return ws;
 }
 
 function buildLicSheet() {
-  const rows = [['Package','License','Severity','Affected Services']];
-  const merges = [];
-  const byPkg = {};
-  LIC_DATA.forEach(r => { if(!byPkg[r.pkg]) byPkg[r.pkg]=[]; byPkg[r.pkg].push(r); });
-
-  let rowIdx = 1;
-  sortedPackagesByMergedFirst(byPkg).forEach(pkg => {
-    const lics = byPkg[pkg];
-    lics.sort((a,b) => sevRank(a.severity)-sevRank(b.severity));
-    const start = rowIdx;
-    lics.forEach((lc, i) => {
-      rows.push([
-        i === 0 ? lc.pkg : '',
-        lc.license, lc.severity,
-        lc.folders.join('\\n')
-      ]);
-      rowIdx++;
-    });
-    const end = rowIdx - 1;
-    if (end > start) {
-      // Merge Package (col 0) vertically
-      merges.push({ s:{r:start,c:0}, e:{r:end,c:0} });
-    }
+  const rows = [['Package','License','Severity','Category','Action','Affected Services']];
+  LIC_DATA.forEach(g => {
+    const lics = [...g.licenses].sort((a,b) => sevRank(a.severity)-sevRank(b.severity));
+    rows.push([
+      g.pkg,
+      lics.map(lc => lc.license || '-').join('\\n'),
+      lics.map(lc => lc.severity || 'UNKNOWN').join('\\n'),
+      lics.map(lc => lc.category || '-').join('\\n'),
+      lics.map(lc => {
+        const sev = String(lc.severity || '').toUpperCase();
+        const cat = String(lc.category || '').toLowerCase();
+        const name = String(lc.license || '');
+        if (['CRITICAL','HIGH'].includes(sev) || cat.includes('restricted') || cat.includes('forbidden')) return 'Replace';
+        if (['MEDIUM','LOW'].includes(sev) || cat.includes('reciprocal') || cat.includes('notice')) return 'Review';
+        if (name.startsWith('LicenseRef-') || sev === 'UNKNOWN' || !cat || cat === 'unknown') return 'Review';
+        return 'OK';
+      }).join('\\n'),
+      g.folders.join('\\n')
+    ]);
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [38,28,10,35].map(w=>({wch:w}));
-  ws['!merges'] = merges;
-  applyHeader(ws, 4);
-  merges.forEach(m => styleMergedCell(ws, m.s.c, m.s.r, m.e.r));
+  ws['!cols'] = [38,34,14,20,16,35].map(w=>({wch:w}));
+  applyHeader(ws, 6);
   applySeverityColors(ws, 2);
   return ws;
 }
@@ -871,8 +875,8 @@ function exportExcel() {
     Path(output_html).write_text(html, encoding="utf-8")
     print("Consolidated report saved: {0}".format(output_html))
     print("  Services scanned   : {0}".format(len(folders_found)))
-    print("  Unique CVEs        : {0}".format(len(vuln_groups)))
-    print("  Unique licenses    : {0}".format(len(lic_groups)))
+    print("  Vulnerability package rows : {0}".format(len(vuln_groups)))
+    print("  License package rows       : {0}".format(len(lic_groups)))
 
 
 if __name__ == "__main__":

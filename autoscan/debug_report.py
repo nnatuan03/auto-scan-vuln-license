@@ -34,9 +34,16 @@ DOCUMENT_COVERAGE: list[dict[str, str]] = [
     {
         "case": "Maven license scan",
         "document": "mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom, normalize bom.json, scan license JSON/TXT.",
-        "implementation": "Prefers mvnw/mvnw.cmd, then mvn; runs makeAggregateBom to create a fresh SBOM in the run folder, then normalizes and scans license.",
+        "implementation": "Prefers mvnw/mvnw.cmd, then mvn; prebuilds Maven modules that are dependencies of other local Maven projects, runs makeAggregateBom to create a fresh SBOM in the run folder, then normalizes and scans license.",
         "status": "COVERED",
         "difference": "Output is stored under scan-results for this run instead of target/bom.json.",
+    },
+    {
+        "case": "Maven internal library metadata",
+        "document": "Maven/Gradle scans must run from source with the dependency metadata needed to resolve the real dependency graph.",
+        "implementation": "Before service scans, detects Maven projects in the submitted folder that are dependencies of other Maven projects and runs mvn clean install -DskipTests -Dmaven.test.skip=true so local .m2 has both jar and pom metadata.",
+        "status": "COVERED_PLUS",
+        "difference": "If prebuild fails, the debug report records the failed command and scan continues with available Maven metadata.",
     },
     {
         "case": "Node.js npm/package-lock license scan",
@@ -317,6 +324,7 @@ def build_debug_data(
     results: list[ScanResult],
     merged_report: Path | None,
     dry_run: bool,
+    maven_prebuild: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ok = sum(1 for result in results if result.status == "OK")
     failed = sum(1 for result in results if result.status == "FAIL")
@@ -340,6 +348,7 @@ def build_debug_data(
             "SBOM is regenerated into scan-results on every run; existing SBOM files in source are not reused.",
         ],
         "document_coverage": DOCUMENT_COVERAGE,
+        "maven_prebuild": maven_prebuild or {},
         "services": [_service_debug(result) for result in results],
     }
 
@@ -388,6 +397,51 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
             for item in data["document_coverage"]
         ],
     ))
+
+    prebuild = data.get("maven_prebuild") or {}
+    lines.extend([
+        "",
+        "## Maven Prebuild",
+        "",
+        f"- Enabled: `{prebuild.get('enabled', False)}`",
+        f"- Skipped: `{prebuild.get('skipped', False)}`",
+        f"- Skip reason: `{prebuild.get('skip_reason') or '-'}`",
+        f"- Maven projects detected: `{prebuild.get('maven_projects', 0)}`",
+        f"- Internal build projects: `{len(prebuild.get('internal_build_projects') or [])}`",
+        f"- Installed: `{len(prebuild.get('installed') or [])}`",
+        f"- Failed: `{len(prebuild.get('failed') or [])}`",
+        f"- Log: `{prebuild.get('log') or '-'}`",
+        "",
+    ])
+    internal_builds = prebuild.get("internal_build_projects") or []
+    if internal_builds:
+        lines.extend(_markdown_table(
+            ["Project", "Coordinate", "Packaging", "Path"],
+            [
+                [
+                    item.get("project"),
+                    item.get("coordinate"),
+                    item.get("packaging"),
+                    item.get("path"),
+                ]
+                for item in internal_builds
+            ],
+        ))
+    failed_prebuilds = prebuild.get("failed") or []
+    if failed_prebuilds:
+        lines.extend(["", "Failed Maven prebuilds:", ""])
+        for item in failed_prebuilds:
+            lines.append(
+                f"- `{item.get('project')}` `{item.get('coordinate')}` "
+                f"exit `{item.get('returncode', '-')}`"
+            )
+            for warning in item.get("missing_pom_warnings") or []:
+                lines.append(f"  - `{warning}`")
+    parse_errors = prebuild.get("parse_errors") or []
+    if parse_errors:
+        lines.extend(["", "Maven POM parse warnings:", ""])
+        for item in parse_errors:
+            lines.append(f"- `{item.get('project')}`: `{item.get('error')}`")
 
     lines.extend([
         "",
@@ -534,10 +588,11 @@ def write_debug_reports(
     results: list[ScanResult],
     merged_report: Path | None,
     dry_run: bool,
+    maven_prebuild: dict[str, Any] | None = None,
 ) -> dict[str, Path]:
     ensure_dir(run_dir)
     ensure_dir(output_base)
-    data = build_debug_data(root, run_dir, output_base, results, merged_report, dry_run)
+    data = build_debug_data(root, run_dir, output_base, results, merged_report, dry_run, maven_prebuild)
     markdown = render_debug_markdown(data)
 
     run_json = run_dir / "debug-report.json"

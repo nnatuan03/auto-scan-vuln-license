@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -13,6 +14,7 @@ if str(ROOT) not in sys.path:
 from autoscan.batch import scan_all
 from autoscan.dependency_health import analyze_dependency_health
 from autoscan.detector import discover_projects
+from autoscan.maven_prebuild import plan_internal_maven_prebuilds
 from autoscan.models import Project
 from autoscan.package_names import annotate_report_package_names
 from autoscan.reporting.merge_report import generate_html as generate_merged_html
@@ -31,6 +33,44 @@ def create_matrix(root: Path) -> dict[str, str]:
   <groupId>com.example</groupId>
   <artifactId>maven-ok</artifactId>
   <version>1.0.0</version>
+</project>
+""")
+
+    write(root / "maven-parent/pom.xml", """
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example.internal</groupId>
+  <artifactId>maven-parent</artifactId>
+  <version>1.0.0</version>
+  <packaging>pom</packaging>
+</project>
+""")
+
+    write(root / "maven-internal-lib/pom.xml", """
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.example.internal</groupId>
+    <artifactId>maven-parent</artifactId>
+    <version>1.0.0</version>
+  </parent>
+  <artifactId>maven-internal-lib</artifactId>
+</project>
+""")
+
+    write(root / "maven-service-uses-lib/pom.xml", """
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example.service</groupId>
+  <artifactId>maven-service-uses-lib</artifactId>
+  <version>1.0.0</version>
+  <dependencies>
+    <dependency>
+      <groupId>com.example.internal</groupId>
+      <artifactId>maven-internal-lib</artifactId>
+      <version>1.0.0</version>
+    </dependency>
+  </dependencies>
 </project>
 """)
 
@@ -138,6 +178,9 @@ GEM
 
     return {
         "maven-ok": "DEPENDENCY_HEALTH_OK",
+        "maven-parent": "DEPENDENCY_HEALTH_OK",
+        "maven-internal-lib": "DEPENDENCY_HEALTH_OK",
+        "maven-service-uses-lib": "DEPENDENCY_HEALTH_OK",
         "gradle-ok": "DEPENDENCY_HEALTH_OK",
         "node-ok": "DEPENDENCY_HEALTH_OK",
         "node-stale-lock": "MANIFEST_LOCK_MISMATCH",
@@ -185,6 +228,15 @@ def assert_dry_run_debug(root: Path, expected: dict[str, str], output: Path) -> 
     debug_md = (run_dir / "debug-report.md").read_text(encoding="utf-8")
     for status in set(expected.values()):
         assert status in debug_md, f"{status} missing from debug report"
+    assert "## Maven Prebuild" in debug_md
+    assert "maven-internal-lib" in debug_md
+
+
+def assert_maven_prebuild_plan(root: Path) -> None:
+    projects = [project for project in discover_projects(root, recursive_depth=2) if project.kind == "maven"]
+    plan = plan_internal_maven_prebuilds(projects)
+    names = [info.project.name for info in plan["projects"]]
+    assert names == ["maven-parent", "maven-internal-lib"], f"unexpected Maven prebuild plan: {names}"
 
 
 def assert_report_package_name_recovery(output: Path) -> None:
@@ -222,6 +274,14 @@ def assert_report_package_name_recovery(output: Path) -> None:
                         "VulnerabilityID": "CVE-2026-0001",
                         "Severity": "HIGH",
                         "Title": "sample",
+                    },
+                    {
+                        "PkgIdentifier": {"PURL": "pkg:npm/%40angular/core@1.80.0"},
+                        "InstalledVersion": "1.80.0",
+                        "VulnerabilityID": "CVE-2026-0002",
+                        "Severity": "MEDIUM",
+                        "FixedVersion": "1.81.0",
+                        "Title": "second sample",
                     }
                 ],
                 "Licenses": [
@@ -230,6 +290,13 @@ def assert_report_package_name_recovery(output: Path) -> None:
                         "Name": "MIT",
                         "Severity": "LOW",
                         "Category": "permissive",
+                    },
+                    {
+                        "PkgName": "@scope/ui",
+                        "FilePath": "node_modules/@scope/ui/NOTICE",
+                        "Name": "Apache-2.0",
+                        "Severity": "LOW",
+                        "Category": "notice",
                     }
                 ],
             },
@@ -248,7 +315,7 @@ def assert_report_package_name_recovery(output: Path) -> None:
         ],
     }
     stats = annotate_report_package_names(report)
-    assert stats["vulnerabilities"]["resolved_from_fallback"] == 1
+    assert stats["vulnerabilities"]["resolved_from_fallback"] == 2
     assert stats["licenses"]["resolved_from_fallback"] == 2
 
     report_path = service_dir / "report.json"
@@ -266,6 +333,10 @@ def assert_report_package_name_recovery(output: Path) -> None:
     ):
         assert expected in html, f"{expected} missing from single report"
     assert "MANIFEST_LOCK_MISMATCH" in merged
+    assert re.search(r'<tr class="data-row pkg-row"[^>]*>.*@angular/core.*CVE-2026-0001.*CVE-2026-0002.*</tr>', html, re.S)
+    assert re.search(r'<tr class="data-row lic-row"[^>]*>.*@scope/ui.*Apache-2.0.*MIT.*</tr>', html, re.S)
+    assert re.search(r'<tr class="data-row lic-grp[^"]*"[^>]*>.*@angular/core.*CVE-2026-0001.*CVE-2026-0002.*</tr>', merged, re.S)
+    assert re.search(r'<tr class="data-row lic-grp[^"]*"[^>]*>.*@scope/ui.*Apache-2.0.*MIT.*</tr>', merged, re.S)
 
 
 def main() -> int:
@@ -275,6 +346,7 @@ def main() -> int:
         output_root = temp_dir / "output"
         expected = create_matrix(source_root)
         assert_dependency_health_matrix(source_root, expected)
+        assert_maven_prebuild_plan(source_root)
         assert_dry_run_debug(source_root, expected, output_root / "dry-run")
         assert_report_package_name_recovery(output_root / "reports")
         print("ecosystem-matrix-ok")

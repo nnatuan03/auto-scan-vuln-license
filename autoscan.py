@@ -19,6 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS, help="Parallel project scans.")
     parser.add_argument("--recursive-depth", type=int, default=DEFAULT_RECURSIVE_DEPTH, help="Project discovery depth for nested services/workspaces.")
     parser.add_argument("--trivy-only", action="store_true", help="Skip ecosystem-specific SBOM generators and use trivy fs only.")
+    parser.add_argument("--skip-maven-prebuild", action="store_true", help="Do not prebuild local Maven libraries before scanning Maven services.")
     parser.add_argument("--dry-run", action="store_true", help="Only detect projects; do not run external scan commands.")
     parser.add_argument("--no-dashboard", action="store_true", help="Disable the console progress dashboard.")
     parser.add_argument("--hide-commands", action="store_true", help="Do not print each external command to the terminal.")
@@ -46,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         recursive_depth=max(0, args.recursive_depth),
         trivy_only=args.trivy_only,
         dry_run=args.dry_run,
+        maven_prebuild=not args.skip_maven_prebuild,
         progress_callback=dashboard,
     )
 

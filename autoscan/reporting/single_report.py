@@ -242,6 +242,29 @@ def generate_html(report_path="report.json", output_path="report.html"):
     def action_chip(action, color):
         return f'<span class="action-chip" style="color:{color};border-color:{color}50;background:{color}10">{action}</span>'
 
+    def line_stack(items):
+        values = [str(item) for item in items if str(item or "").strip()]
+        if not values:
+            values = ["-"]
+        return '<div class="line-stack">' + "".join(f"<div>{escape(value)}</div>" for value in values) + "</div>"
+
+    def html_line_stack(items):
+        values = [str(item) for item in items if str(item or "").strip()]
+        if not values:
+            values = ["-"]
+        return '<div class="line-stack">' + "".join(f"<div>{value}</div>" for value in values) + "</div>"
+
+    def unique_values(items):
+        values = []
+        seen = set()
+        for item in items:
+            value = str(item or "").strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            values.append(value)
+        return values
+
     def breakdown_bar(sev_counts):
         total = sum(sev_counts.values())
         if not total:
@@ -261,43 +284,53 @@ def generate_html(report_path="report.json", output_path="report.html"):
     vuln_summary_rows = ""
     for i, g in enumerate(pkg_groups):
         sev_order = SEVERITY_ORDER.get(g["highest_severity"], 99)
-        fix_display = f'<span class="fix-version">{g["fix_to"]}</span>' if g["fix_to"] != "-" else '<span style="color:#a0aec0;font-size:12px">No fix available</span>'
-        cve_sub = ""
-        for cv in g["cves"]:
-            cve_sub += f"""<tr class="sub-row detail-vuln-{i}">
-                <td style="padding-left:40px">
-                    <a href="{cv['url']}" target="_blank" class="cve-link">{cv['cve']}</a>
-                </td>
-                <td></td><td></td>
-                <td>{sev_chip(cv['severity'])}</td>
-                <td></td>
-                <td style="color:#4a5568;font-size:12px">{cv['title'][:80]}{'...' if len(cv['title'])>80 else ''}</td>
-                <td></td>
-            </tr>"""
+        cves = sorted(g["cves"], key=lambda cv: (SEVERITY_ORDER.get(cv["severity"], 99), cv["cve"].lower()))
+        cve_links = [
+            f'<a href="{escape(cv["url"])}" target="_blank" class="cve-link">{escape(cv["cve"])}</a>'
+            for cv in cves
+        ]
+        severity_lines = [sev_chip(cv["severity"]) for cv in cves]
+        fixed_lines = [cv["fixed"] or "-" for cv in cves]
+        title_lines = [
+            cv["title"][:120] + ("..." if len(cv["title"]) > 120 else "")
+            for cv in cves
+        ]
+        severity_attr = ",".join(unique_values(cv["severity"] for cv in cves))
         vuln_summary_rows += f"""
-        <tr class="data-row pkg-row" data-idx="{i}" data-severity="{g['highest_severity']}" data-sev-order="{sev_order}" onclick="toggleDetail('vuln',{i},this)">
-            <td><div style="display:flex;align-items:center;gap:8px"><span class="expand-btn" id="icon-vuln-{i}">+</span><span class="pkg-name">{g['pkg']}</span></div></td>
-            <td><span class="version-tag">{g['version']}</span></td>
-            <td>{fix_display}</td>
-            <td data-value="{sev_order}">{sev_chip(g['highest_severity'])}</td>
+        <tr class="data-row pkg-row" data-idx="{i}" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}" data-sev-order="{sev_order}">
+            <td><span class="pkg-name">{escape(g['pkg'])}</span></td>
+            <td><span class="version-tag">{escape(g['version'])}</span></td>
+            <td>{html_line_stack(cve_links)}</td>
+            <td data-value="{sev_order}">{html_line_stack(severity_lines)}</td>
+            <td>{line_stack(fixed_lines)}</td>
             <td>{breakdown_bar(g['sev_counts'])}</td>
+            <td style="color:#4a5568;font-size:12px;max-width:420px">{line_stack(title_lines)}</td>
             <td><span class="count-pill">{g['cve_count']}</span></td>
-            <td class="dim-text">{g['target']}</td>
-        </tr>{cve_sub}"""
+            <td class="dim-text">{escape(g['target'])}</td>
+        </tr>"""
 
     # ── VULN DETAIL ROWS ──
     def vuln_detail_rows():
         rows = ""
-        for r in vuln_rows:
-            sev_order = SEVERITY_ORDER.get(r["severity"], 99)
-            rows += f"""<tr class="data-row" data-severity="{r['severity']}">
-                <td class="pkg-name">{r['pkg']}</td>
-                <td><span class="version-tag">{r['version']}</span></td>
-                <td><span class="fix-version">{r['fixed']}</span></td>
-                <td><a href="{r['url']}" target="_blank" class="cve-link">{r['cve']}</a></td>
-                <td data-value="{sev_order}">{sev_chip(r['severity'])}</td>
-                <td style="color:#4a5568;max-width:360px">{r['title']}</td>
-                <td class="dim-text">{r['target']}</td>
+        for g in pkg_groups:
+            cves = sorted(g["cves"], key=lambda cv: (SEVERITY_ORDER.get(cv["severity"], 99), cv["cve"].lower()))
+            sev_order = SEVERITY_ORDER.get(g["highest_severity"], 99)
+            cve_links = [
+                f'<a href="{escape(cv["url"])}" target="_blank" class="cve-link">{escape(cv["cve"])}</a>'
+                for cv in cves
+            ]
+            severity_lines = [sev_chip(cv["severity"]) for cv in cves]
+            fixed_lines = [cv["fixed"] or "-" for cv in cves]
+            title_lines = [cv["title"] for cv in cves]
+            severity_attr = ",".join(unique_values(cv["severity"] for cv in cves))
+            rows += f"""<tr class="data-row" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}">
+                <td class="pkg-name">{escape(g['pkg'])}</td>
+                <td><span class="version-tag">{escape(g['version'])}</span></td>
+                <td>{html_line_stack(cve_links)}</td>
+                <td data-value="{sev_order}">{html_line_stack(severity_lines)}</td>
+                <td>{line_stack(fixed_lines)}</td>
+                <td style="color:#4a5568;max-width:420px">{line_stack(title_lines)}</td>
+                <td class="dim-text">{escape(g['target'])}</td>
             </tr>"""
         return rows
 
@@ -305,46 +338,53 @@ def generate_html(report_path="report.json", output_path="report.html"):
     lic_summary_rows = ""
     for i, g in enumerate(lic_groups):
         sev_order = SEVERITY_ORDER.get(g["highest_severity"], 99)
-        lic_chips_html = " ".join(lic_chip(n) for n in g["license_names"])
-        cat_str = ", ".join(g["categories"]) if g["categories"] else "-"
-        act_html = action_chip(g["action"], g["action_color"])
-        lic_sub = ""
-        for lc in g["lics"]:
-            lc_sev_order = SEVERITY_ORDER.get(lc["severity"], 99)
+        lics = sorted(g["lics"], key=lambda lc: (SEVERITY_ORDER.get(lc["severity"], 99), lc["license"].lower()))
+        lic_lines = [lic_chip(lc["license"]) for lc in lics]
+        severity_lines = [sev_chip(lc["severity"]) for lc in lics]
+        category_lines = [lc.get("category", "-") or "-" for lc in lics]
+        action_lines = []
+        for lc in lics:
             lc_action, lc_color = get_license_action(lc["severity"], lc.get("category", ""))
-            lc_border, lc_bg = get_license_badge_color(lc["license"])
-            lic_sub += f"""<tr class="sub-row detail-lic-{i}">
-                <td style="padding-left:40px">{lic_chip(lc['license'])}</td>
-                <td data-value="{lc_sev_order}">{sev_chip(lc['severity'])}</td>
-                <td style="color:#4a5568;font-size:12px">{lc.get('category','-')}</td>
-                <td>{action_chip(lc_action, lc_color)}</td>
-                <td class="dim-text" colspan="3">{lc.get('filepath','-')}</td>
-            </tr>"""
+            action_lines.append(action_chip(lc_action, lc_color))
+        severity_attr = ",".join(unique_values(lc["severity"] for lc in lics))
+        category_attr = ",".join(unique_values(lc.get("category", "") for lc in lics))
+        action_attr = ",".join(unique_values(action for action, _ in (get_license_action(lc["severity"], lc.get("category", "")) for lc in lics)))
         lic_summary_rows += f"""
-        <tr class="data-row lic-row" data-idx="{i}" data-severity="{g['highest_severity']}" data-sev-order="{sev_order}" onclick="toggleDetail('lic',{i},this)">
-            <td><div style="display:flex;align-items:center;gap:8px"><span class="expand-btn" id="icon-lic-{i}">+</span><span class="pkg-name">{g['pkg']}</span></div></td>
-            <td style="max-width:280px">{lic_chips_html}</td>
-            <td data-value="{sev_order}">{sev_chip(g['highest_severity'])}</td>
-            <td style="color:#4a5568;font-size:12px">{cat_str}</td>
-            <td>{act_html}</td>
+        <tr class="data-row lic-row" data-idx="{i}" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}" data-categories="{escape(category_attr)}" data-actions="{escape(action_attr)}" data-sev-order="{sev_order}">
+            <td><span class="pkg-name">{escape(g['pkg'])}</span></td>
+            <td style="max-width:280px">{html_line_stack(lic_lines)}</td>
+            <td data-value="{sev_order}">{html_line_stack(severity_lines)}</td>
+            <td style="color:#4a5568;font-size:12px">{line_stack(category_lines)}</td>
+            <td>{html_line_stack(action_lines)}</td>
             <td><span class="count-pill">{g['lic_count']}</span></td>
-            <td class="dim-text">{g['target']}</td>
-        </tr>{lic_sub}"""
+            <td class="dim-text">{escape(g['target'])}</td>
+        </tr>"""
 
     # ── LICENSE DETAIL ROWS ──
     def lic_detail_rows():
         rows = ""
-        for r in license_rows:
-            sev_order = SEVERITY_ORDER.get(r["severity"], 99)
-            act, act_color = get_license_action(r["severity"], r.get("category", ""))
-            rows += f"""<tr class="data-row" data-severity="{r['severity']}" data-category="{r.get('category','')}">
-                <td class="pkg-name">{r['pkg']}</td>
-                <td>{lic_chip(r['license'])}</td>
-                <td data-value="{sev_order}">{sev_chip(r['severity'])}</td>
-                <td style="color:#4a5568;font-size:12px">{r.get('category','-')}</td>
-                <td>{action_chip(act, act_color)}</td>
-                <td class="dim-text" style="font-size:11px">{r.get('filepath','-')}</td>
-                <td class="dim-text">{r['target']}</td>
+        for g in lic_groups:
+            lics = sorted(g["lics"], key=lambda lc: (SEVERITY_ORDER.get(lc["severity"], 99), lc["license"].lower()))
+            sev_order = SEVERITY_ORDER.get(g["highest_severity"], 99)
+            lic_lines = [lic_chip(lc["license"]) for lc in lics]
+            severity_lines = [sev_chip(lc["severity"]) for lc in lics]
+            category_lines = [lc.get("category", "-") or "-" for lc in lics]
+            filepath_lines = [lc.get("filepath", "-") or "-" for lc in lics]
+            action_lines = []
+            for lc in lics:
+                act, act_color = get_license_action(lc["severity"], lc.get("category", ""))
+                action_lines.append(action_chip(act, act_color))
+            severity_attr = ",".join(unique_values(lc["severity"] for lc in lics))
+            category_attr = ",".join(unique_values(lc.get("category", "") for lc in lics))
+            action_attr = ",".join(unique_values(action for action, _ in (get_license_action(lc["severity"], lc.get("category", "")) for lc in lics)))
+            rows += f"""<tr class="data-row" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}" data-categories="{escape(category_attr)}" data-actions="{escape(action_attr)}">
+                <td class="pkg-name">{escape(g['pkg'])}</td>
+                <td>{html_line_stack(lic_lines)}</td>
+                <td data-value="{sev_order}">{html_line_stack(severity_lines)}</td>
+                <td style="color:#4a5568;font-size:12px">{line_stack(category_lines)}</td>
+                <td>{html_line_stack(action_lines)}</td>
+                <td class="dim-text" style="font-size:11px">{line_stack(filepath_lines)}</td>
+                <td class="dim-text">{escape(g['target'])}</td>
             </tr>"""
         return rows
 
@@ -398,7 +438,13 @@ def generate_html(report_path="report.json", output_path="report.html"):
         "categories": g["categories"],
         "action": g["action"],
         "lic_count": g["lic_count"],
-        "lics": g["lics"],
+        "lics": [
+            {
+                **lic,
+                "action": get_license_action(lic["severity"], lic.get("category", ""), lic.get("license", ""))[0],
+            }
+            for lic in g["lics"]
+        ],
     } for g in lic_groups], ensure_ascii=False).replace('</script>', '<\\/script>').replace('<!--', '<\\!--')
 
     vuln_json = json.dumps(vuln_rows, ensure_ascii=False).replace('</script>', '<\\/script>').replace('<!--', '<\\!--')
@@ -919,6 +965,18 @@ def generate_html(report_path="report.json", output_path="report.html"):
     font-family: 'IBM Plex Mono', monospace;
   }}
 
+  .line-stack {{
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: flex-start;
+  }}
+
+  .line-stack > div {{
+    min-height: 20px;
+    line-height: 1.45;
+  }}
+
   .no-data {{
     text-align: center;
     padding: 48px;
@@ -1123,7 +1181,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
   <div class="tab-panel" id="tab-vuln-sum">
     <div class="section-header">
       <span class="section-title">Affected Packages</span>
-      <span class="section-desc">{len(pkg_groups)} packages — click a row to expand individual CVEs</span>
+      <span class="section-desc">{len(pkg_groups)} packages — CVEs, severities, fixes, and titles are grouped per package</span>
     </div>
     <div class="info-banner">
       The <strong>Fix To</strong> column shows the minimum version that resolves all CVEs for that package. Updating to this version eliminates the need to patch each CVE individually.
@@ -1135,7 +1193,6 @@ def generate_html(report_path="report.json", output_path="report.html"):
         <option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option><option>UNKNOWN</option>
       </select>
       <button class="btn btn-ghost" onclick="resetVS()">Reset</button>
-      <button class="btn btn-expand" onclick="toggleAll('vuln')" id="btnExpandVuln">Expand All</button>
       <div class="toolbar-right">
         <button class="btn btn-success" onclick="exportExcel()">Export Excel</button>
         <span class="row-count" id="vsCount">{len(pkg_groups)} packages</span>
@@ -1147,14 +1204,16 @@ def generate_html(report_path="report.json", output_path="report.html"):
         <thead><tr>
           <th onclick="sortTable('vsTable',0)">Package <span class="si">⇅</span></th>
           <th onclick="sortTable('vsTable',1)">Current Version <span class="si">⇅</span></th>
-          <th onclick="sortTable('vsTable',2)">Fix To <span class="si">⇅</span></th>
+          <th onclick="sortTable('vsTable',2)">CVE ID <span class="si">⇅</span></th>
           <th onclick="sortTable('vsTable',3)">Severity <span class="si">⇅</span></th>
+          <th onclick="sortTable('vsTable',4)">Fix To <span class="si">⇅</span></th>
           <th>Breakdown</th>
-          <th onclick="sortTable('vsTable',5)">CVE Count <span class="si">⇅</span></th>
+          <th>Title</th>
+          <th onclick="sortTable('vsTable',7)">CVE Count <span class="si">⇅</span></th>
           <th>Target</th>
         </tr></thead>
         <tbody id="vsBody">
-          {vuln_summary_rows or '<tr><td colspan="7" class="no-data">No vulnerabilities found.</td></tr>'}
+          {vuln_summary_rows or '<tr><td colspan="9" class="no-data">No vulnerabilities found.</td></tr>'}
         </tbody>
       </table>
       </div>
@@ -1165,7 +1224,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
   <div class="tab-panel" id="tab-vuln-detail">
     <div class="section-header">
       <span class="section-title">All CVEs</span>
-      <span class="section-desc">Complete list — {len(vuln_rows)} entries across {len(pkg_groups)} packages</span>
+      <span class="section-desc">Complete list — {len(vuln_rows)} entries grouped into {len(pkg_groups)} package rows</span>
     </div>
     <div class="toolbar">
       <input class="search-input" type="text" id="vdSearch" placeholder="Filter by package, CVE, title..." oninput="filterVD()">
@@ -1185,9 +1244,9 @@ def generate_html(report_path="report.json", output_path="report.html"):
         <thead><tr>
           <th onclick="sortTable('vdTable',0)">Package <span class="si">⇅</span></th>
           <th onclick="sortTable('vdTable',1)">Installed <span class="si">⇅</span></th>
-          <th onclick="sortTable('vdTable',2)">Fixed In <span class="si">⇅</span></th>
-          <th onclick="sortTable('vdTable',3)">CVE ID <span class="si">⇅</span></th>
-          <th onclick="sortTable('vdTable',4)">Severity <span class="si">⇅</span></th>
+          <th onclick="sortTable('vdTable',2)">CVE ID <span class="si">⇅</span></th>
+          <th onclick="sortTable('vdTable',3)">Severity <span class="si">⇅</span></th>
+          <th onclick="sortTable('vdTable',4)">Fixed In <span class="si">⇅</span></th>
           <th onclick="sortTable('vdTable',5)">Title <span class="si">⇅</span></th>
           <th>Target</th>
         </tr></thead>
@@ -1203,7 +1262,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
   <div class="tab-panel" id="tab-lic-sum">
     <div class="section-header">
       <span class="section-title">License Summary by Package</span>
-      <span class="section-desc">{len(lic_groups)} packages — click a row to expand individual licenses</span>
+      <span class="section-desc">{len(lic_groups)} packages — licenses, severities, categories, and actions are grouped per package</span>
     </div>
     <div class="legend-bar">
       <span class="legend-label">License Type</span>
@@ -1228,7 +1287,6 @@ def generate_html(report_path="report.json", output_path="report.html"):
         <option>Replace</option><option>Review</option><option>OK</option>
       </select>
       <button class="btn btn-ghost" onclick="resetLS()">Reset</button>
-      <button class="btn btn-expand" onclick="toggleAll('lic')" id="btnExpandLic">Expand All</button>
       <div class="toolbar-right">
         <button class="btn btn-success" onclick="exportExcel()">Export Excel</button>
         <span class="row-count" id="lsCount">{len(lic_groups)} packages</span>
@@ -1258,7 +1316,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
   <div class="tab-panel" id="tab-lic-detail">
     <div class="section-header">
       <span class="section-title">License Detail</span>
-      <span class="section-desc">Full list — {len(license_rows)} entries for developer compliance review</span>
+      <span class="section-desc">Full list — {len(license_rows)} entries grouped into {len(lic_groups)} package rows</span>
     </div>
     <div class="toolbar">
       <input class="search-input" type="text" id="ldSearch" placeholder="Filter by package, license..." oninput="filterLD()">
@@ -1277,7 +1335,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
       <button class="btn btn-ghost" onclick="resetLD()">Reset</button>
       <div class="toolbar-right">
         <button class="btn btn-success" onclick="exportExcel()">Export Excel</button>
-        <span class="row-count" id="ldCount">{len(license_rows)} licenses</span>
+        <span class="row-count" id="ldCount">{len(lic_groups)} packages</span>
       </div>
     </div>
     <div class="table-wrap">
@@ -1387,7 +1445,8 @@ function filterVS() {{
   const sev=document.getElementById('vsSevFilter').value;
   let c=0;
   document.querySelectorAll('#vsBody tr.pkg-row').forEach(tr=>{{
-    const show=(!q||tr.innerText.toLowerCase().includes(q))&&(!sev||tr.dataset.severity===sev);
+    const severities = tr.dataset.severities || tr.dataset.severity || '';
+    const show=(!q||tr.innerText.toLowerCase().includes(q))&&(!sev||severities.split(',').includes(sev));
     tr.classList.toggle('hidden',!show);
     document.querySelectorAll('.detail-vuln-'+tr.dataset.idx).forEach(r=>r.classList.toggle('hidden',!show));
     if(show)c++;
@@ -1400,10 +1459,11 @@ function filterVD() {{
   const sev=document.getElementById('vdSevFilter').value;
   let c=0;
   document.querySelectorAll('#vdBody tr').forEach(tr=>{{
-    const show=(!q||tr.innerText.toLowerCase().includes(q))&&(!sev||tr.dataset.severity===sev);
+    const severities = tr.dataset.severities || tr.dataset.severity || '';
+    const show=(!q||tr.innerText.toLowerCase().includes(q))&&(!sev||severities.split(',').includes(sev));
     tr.classList.toggle('hidden',!show);if(show)c++;
   }});
-  document.getElementById('vdCount').textContent=c+' CVEs';
+  document.getElementById('vdCount').textContent=c+' packages';
 }}
 
 function filterLS() {{
@@ -1414,7 +1474,10 @@ function filterLS() {{
   let c=0;
   document.querySelectorAll('#lsBody tr.lic-row').forEach(tr=>{{
     const text=tr.innerText.toLowerCase();
-    const show=(!q||text.includes(q))&&(!sev||tr.dataset.severity===sev)&&(!cat||text.includes(cat.toLowerCase()))&&(!act||text.includes(act.toLowerCase()));
+    const severities = tr.dataset.severities || tr.dataset.severity || '';
+    const categories = (tr.dataset.categories || '').toLowerCase().split(',');
+    const actions = (tr.dataset.actions || '').toLowerCase().split(',');
+    const show=(!q||text.includes(q))&&(!sev||severities.split(',').includes(sev))&&(!cat||categories.includes(cat.toLowerCase()))&&(!act||actions.includes(act.toLowerCase()));
     tr.classList.toggle('hidden',!show);
     document.querySelectorAll('.detail-lic-'+tr.dataset.idx).forEach(r=>r.classList.toggle('hidden',!show));
     if(show)c++;
@@ -1430,10 +1493,13 @@ function filterLD() {{
   let c=0;
   document.querySelectorAll('#ldBody tr').forEach(tr=>{{
     const text=tr.innerText.toLowerCase();
-    const show=(!q||text.includes(q))&&(!sev||tr.dataset.severity===sev)&&(!cat||tr.dataset.category===cat)&&(!act||text.includes(act.toLowerCase()));
+    const severities = tr.dataset.severities || tr.dataset.severity || '';
+    const categories = (tr.dataset.categories || '').toLowerCase().split(',');
+    const actions = (tr.dataset.actions || '').toLowerCase().split(',');
+    const show=(!q||text.includes(q))&&(!sev||severities.split(',').includes(sev))&&(!cat||categories.includes(cat.toLowerCase()))&&(!act||actions.includes(act.toLowerCase()));
     tr.classList.toggle('hidden',!show);if(show)c++;
   }});
-  document.getElementById('ldCount').textContent=c+' licenses';
+  document.getElementById('ldCount').textContent=c+' packages';
 }}
 
 function resetVS(){{document.getElementById('vsSearch').value='';document.getElementById('vsSevFilter').value='';filterVS();}}
@@ -1485,7 +1551,7 @@ function applyMergesAndStyle(ws, merges, headerRow, totalCols) {{
       ws[ref].s = {{
         fill:{{ fgColor:{{ rgb: isAlt ? 'F5F8FC' : 'FFFFFF' }} }},
         font:{{ sz:10 }},
-        alignment:{{ vertical:'center', wrapText:false }},
+        alignment:{{ vertical:'center', wrapText:true }},
         border:{{
           bottom:{{ style:'thin', color:{{ rgb:'DDE8F2' }} }},
           right:{{ style:'thin', color:{{ rgb:'DDE8F2' }} }}
@@ -1503,7 +1569,7 @@ function applySeverityColors(ws, severityCol) {{
     const ref = colRef(severityCol)+(r+1);
     const cell = ws[ref];
     if(!cell) continue;
-    const style = SEVERITY_STYLES[String(cell.v || '').toUpperCase()];
+    const style = SEVERITY_STYLES[String(cell.v || '').toUpperCase().split('\\n')[0]];
     if(!style) continue;
     const current = cell.s || {{}};
     cell.s = Object.assign({{}}, current, {{
@@ -1515,65 +1581,47 @@ function applySeverityColors(ws, severityCol) {{
 }}
 
 function buildVulnSheet() {{
-  // Grouped by package, sorted by highest severity inside each group
-  const rows=[['Package','Vulnerability ID','Severity','Installed Version','Fixed Version']];
-  const merges=[];
-  let rowIdx=1; // 0-based, after header
+  const rows=[['Package','Installed Version','CVE ID','Severity','Fixed Version','Title','Target']];
 
   PKG_GROUPS.forEach(g=>{{
     const cves=[...g.cves].sort((a,b)=>sevRank(a.severity)-sevRank(b.severity));
-    const start=rowIdx;
-    cves.forEach((cv,i)=>{{
-      rows.push([
-        i===0 ? g.pkg : '',   // Package: only first row of group
-        cv.cve,
-        cv.severity,
-        g.version,
-        cv.fixed || '-'
-      ]);
-      rowIdx++;
-    }});
-    const end=rowIdx-1;
-    if(end>start) {{
-      // Merge Package col (col 0) and Installed Version col (col 3) for the group
-      merges.push({{s:{{r:start,c:0}},e:{{r:end,c:0}}}});
-      merges.push({{s:{{r:start,c:3}},e:{{r:end,c:3}}}});
-    }}
+    rows.push([
+      g.pkg,
+      g.version,
+      cves.map(cv=>cv.cve).join('\\n'),
+      cves.map(cv=>cv.severity).join('\\n'),
+      cves.map(cv=>cv.fixed || '-').join('\\n'),
+      cves.map(cv=>cv.title || '-').join('\\n'),
+      g.target
+    ]);
   }});
 
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[40,22,10,16,28].map(w=>{{return{{wch:w}}}});
-  applyMergesAndStyle(ws, merges, rows[0], 5);
-  applySeverityColors(ws, 2);
+  ws['!cols']=[40,16,24,14,24,60,35].map(w=>{{return{{wch:w}}}});
+  applyMergesAndStyle(ws, [], rows[0], 7);
+  applySeverityColors(ws, 3);
   return ws;
 }}
 
 function buildLicSheet() {{
-  const rows=[['Package','License','Severity','File Path']];
-  const merges=[];
-  let rowIdx=1;
+  const rows=[['Package','License','Severity','Category','Action','File Path','Target']];
 
   LIC_GROUPS.forEach(g=>{{
     const lics=[...g.lics].sort((a,b)=>sevRank(a.severity)-sevRank(b.severity));
-    const start=rowIdx;
-    lics.forEach((lc,i)=>{{
-      rows.push([
-        i===0 ? g.pkg : '',
-        lc.license,
-        lc.severity,
-        lc.filepath || g.target
-      ]);
-      rowIdx++;
-    }});
-    const end=rowIdx-1;
-    if(end>start) {{
-      merges.push({{s:{{r:start,c:0}},e:{{r:end,c:0}}}});
-    }}
+    rows.push([
+      g.pkg,
+      lics.map(lc=>lc.license || '-').join('\\n'),
+      lics.map(lc=>lc.severity || 'UNKNOWN').join('\\n'),
+      lics.map(lc=>lc.category || '-').join('\\n'),
+      lics.map(lc=>lc.action || '-').join('\\n'),
+      lics.map(lc=>lc.filepath || '-').join('\\n'),
+      g.target
+    ]);
   }});
 
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[40,30,10,40].map(w=>{{return{{wch:w}}}});
-  applyMergesAndStyle(ws, merges, rows[0], 4);
+  ws['!cols']=[40,34,14,20,16,50,35].map(w=>{{return{{wch:w}}}});
+  applyMergesAndStyle(ws, [], rows[0], 7);
   applySeverityColors(ws, 2);
   return ws;
 }}

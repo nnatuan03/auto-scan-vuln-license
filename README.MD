@@ -92,6 +92,7 @@ Vai tro chinh:
 | `run_scan.ps1` | Wrapper PowerShell de chay mot lenh tren Windows. |
 | `autoscan/detector.py` | Tu detect Maven, Gradle, Node, Flutter, .NET, Python, Go, PHP, Ruby. |
 | `autoscan/dependency_health.py` | Detect lock file thieu/cu va mismatch giua manifest voi lock truoc khi tao SBOM. |
+| `autoscan/maven_prebuild.py` | Prebuild/install Maven lib noi bo trong cung source folder truoc khi scan service phu thuoc. |
 | `autoscan/sbom_generator.py` | Tao SBOM theo tung loai source, fallback ve `trivy fs`. |
 | `autoscan/license_normalizer.py` | Chuan hoa license SBOM ve SPDX/LicenseRef. |
 | `autoscan/license_rules.py` | Bo rule normalize license tu ten vendor/free-text ve SPDX ID. |
@@ -157,7 +158,12 @@ Voi moi project/service:
 
 1. Detect loai source.
 2. Luon tao moi SBOM cho lan scan hien tai, khong dung lai SBOM co san trong source de tranh ket qua bi cu khi re-scan.
-3. Tao SBOM theo ecosystem neu co tool phu hop:
+3. Prebuild Maven lib noi bo neu folder scan co nhieu Maven project phu thuoc lan nhau:
+   - Tool doc cac `pom.xml`, tim Maven project nao duoc project khac trong cung source folder tham chieu.
+   - Tool chay `mvn clean install -DskipTests -Dmaven.test.skip=true -DskipITs` cho cac lib/parent noi bo do truoc khi scan.
+   - Muc tieu la dam bao local `.m2` co du ca `.jar` va `.pom`, tranh case service scan ra dependency version cu do thieu metadata lib noi bo.
+   - Neu can bo qua buoc nay de debug nhanh: them `-SkipMavenPrebuild` voi PowerShell hoac `--skip-maven-prebuild` voi Python.
+4. Tao SBOM theo ecosystem neu co tool phu hop:
    - Maven: `mvnw.cmd`/`mvnw` neu co, fallback `mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -DskipTests`
    - Gradle: `gradlew cyclonedxBom` hoac `gradle cyclonedxBom`; neu thieu plugin, tool dung init script tam de apply `org.cyclonedx.bom` version `2.3.1` theo document ma khong sua source.
    - Node.js npm lock: `npx --yes @cyclonedx/cyclonedx-npm --ignore-npm-errors --package-lock-only`
@@ -165,18 +171,18 @@ Voi moi project/service:
    - .NET: `dotnet-CycloneDX <project> -j`; neu thieu tool va co `dotnet`, tool tu chay `dotnet tool install --global CycloneDX`.
    - Flutter/Python/Go/PHP/Ruby/unknown: fallback `trivy fs`
    - Neu generator rieng fail hoac khong tao ra SBOM moi, fallback `trivy fs --format cyclonedx`.
-4. Reconcile version trong SBOM voi version moi nhat tim duoc trong source/lock file hien co. Vi du Node co ca `package-lock.json` va `yarn.lock`, neu SBOM ra `1.80.0` nhung `package.json`/`yarn.lock` dang co `1.84.0`, tool se cap nhat SBOM len `1.84.0` truoc khi scan. Tool khong tu query registry de upgrade dependency ngoai source.
-5. Normalize license thanh `SBOM.cdx-fix.json`.
-6. Chay Trivy nhanh:
+5. Reconcile version trong SBOM voi version moi nhat tim duoc trong source/lock file hien co. Vi du Node co ca `package-lock.json` va `yarn.lock`, neu SBOM ra `1.80.0` nhung `package.json`/`yarn.lock` dang co `1.84.0`, tool se cap nhat SBOM len `1.84.0` truoc khi scan. Tool khong tu query registry de upgrade dependency ngoai source.
+6. Normalize license thanh `SBOM.cdx-fix.json`.
+7. Chay Trivy nhanh:
    - Tool chi chay 1 lenh `trivy sbom --scanners vuln,license --format json` de tao `report.json`
    - Tu `report.json`, tool tach ra `license.json`, `license.txt`, va `vuln.json`
    - Cach nay giu du output nhu cu nhung giam so lan goi Trivy tren moi service
-7. Doi chieu license trong `SBOM.cdx-fix.json` voi `report.json`/`license.json`; neu Trivy tra thieu package license, tool tu bo sung tu SBOM. Component khong khai bao license se hien `LicenseRef-No-Declared-License` de khong bi mat im lang.
-8. Sinh:
+8. Doi chieu license trong `SBOM.cdx-fix.json` voi `report.json`/`license.json`; neu Trivy tra thieu package license, tool tu bo sung tu SBOM. Component khong khai bao license se hien `LicenseRef-No-Declared-License` de khong bi mat im lang.
+9. Sinh:
    - `report.html`
    - `report-vuln.html`
-9. Merge tat ca service thanh `consolidated-report.html`.
-10. Sinh `debug-report.md/json` de doi chieu voi document va debug tung service.
+10. Merge tat ca service thanh `consolidated-report.html`.
+11. Sinh `debug-report.md/json` de doi chieu voi document va debug tung service.
 
 ## Doi chieu voi document ITS
 
@@ -186,7 +192,7 @@ Tool dang cover cac case license/dependency scan trong document, tru cac phan ba
 | --- | --- |
 | Trivy dependency vulnerability scan | Chay `trivy sbom --scanners vuln --format json`, sau do sinh `report-vuln.html`. |
 | Gradle license scan | Chay `gradlew/gradle cyclonedxBom`; neu thieu plugin thi dung init script tam voi `org.cyclonedx.bom` version `2.3.1`. |
-| Maven license scan | Chay `mvnw/mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom`. |
+| Maven license scan | Prebuild/install lib Maven noi bo trong source folder neu service khac phu thuoc, sau do chay `mvnw/mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom`. |
 | Node.js npm/package-lock license scan | Chay `npx --yes @cyclonedx/cyclonedx-npm --ignore-npm-errors`; neu co lock npm thi dung `--package-lock-only`. |
 | .NET license scan | Tu cai `CycloneDX` neu thieu, roi chay `dotnet-CycloneDX` tren `.sln`/`.csproj`. |
 | Normalize SBOM truoc khi scan license | Tao `SBOM.cdx-fix.json` bang module normalize noi bo. |
@@ -261,6 +267,7 @@ Trong file debug, kiem tra theo thu tu:
 
 - `Document Coverage`: case nao dang covered, case nao khac document co chu dich, case nao excluded.
 - `Services`: service nao duoc detect, kind gi, marker nao, SBOM tao bang generator nao.
+- `Maven Prebuild`: lib/parent Maven noi bo nao da duoc `mvn clean install` truoc khi scan, command nao fail.
 - `Dependency health`: canh bao lock file thieu, dependency trong manifest khong co trong lock, hoac manifest version cao hon lock version.
 - `Commands`: command thuc te da chay va exit code.
 - `Retry/fallback note` va `Command failures`: command fail/success tiep theo, kem stderr tail, dung de xem ly do fallback.
@@ -330,6 +337,7 @@ Y nghia:
 | `--max-workers` | So project scan song song. |
 | `--recursive-depth` | Do sau tim project con/nested, huu ich voi monorepo hoac frontend nam trong `apps/`, `packages/`, `frontend/`. |
 | `--trivy-only` | Bo qua generator Maven/Gradle/Node/.NET, chi dung `trivy fs`. |
+| `--skip-maven-prebuild` | Bo qua buoc `mvn clean install` cac Maven lib noi bo truoc khi scan. Chi nen dung khi debug nhanh. |
 | `--dry-run` | Chi detect project, khong chay Trivy hay tool ngoai. |
 | `--output` | Doi folder output mac dinh. |
 | `--no-dashboard` | Tat dashboard tien do trong terminal neu muon log gon. |
@@ -341,6 +349,7 @@ PowerShell wrapper co option tuong ung:
 ```powershell
 .\run_scan.ps1 -Path "D:\Projects" -MaxWorkers 6 -RecursiveDepth 4
 .\run_scan.ps1 -Path "D:\Projects" -TrivyOnly
+.\run_scan.ps1 -Path "D:\Projects" -SkipMavenPrebuild
 .\run_scan.ps1 -Path "D:\Projects" -DryRun
 .\run_scan.ps1 -Path "D:\Projects" -NoDashboard
 .\run_scan.ps1 -Path "D:\Projects" -HideCommands -NoColor
