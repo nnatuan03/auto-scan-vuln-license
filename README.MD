@@ -1,26 +1,97 @@
 # Auto Scan Vulnerability & License
 
-Tool nay tu dong detect loai source-code, tao SBOM, scan dependency vulnerability va license bang Trivy, sau do sinh HTML report tong hop co export Excel.
+> Công cụ dòng lệnh tự động phát hiện loại mã nguồn, sinh SBOM, quét lỗ hổng phụ thuộc và giấy phép bằng **Trivy**, sau đó xuất báo cáo HTML tổng hợp kèm xuất Excel.
 
-Muc tieu: chi can chay mot lenh tren folder source, tool tu xu ly phan con lai.
+**Mục tiêu:** chỉ cần chạy một lệnh trên thư mục mã nguồn — công cụ tự xử lý phần còn lại, từ detect, sinh SBOM, scan, normalize license, tới báo cáo cuối cùng.
 
-## Lenh chay nhanh
+---
 
-Chay tren Windows/PowerShell:
+## Mục lục
+
+1. [Bắt đầu nhanh](#bắt-đầu-nhanh)
+2. [Giao diện dòng lệnh](#giao-diện-dòng-lệnh)
+3. [Dashboard tiến độ](#dashboard-tiến-độ)
+4. [Yêu cầu cài đặt](#yêu-cầu-cài-đặt)
+5. [Các loại mã nguồn được hỗ trợ](#các-loại-mã-nguồn-được-hỗ-trợ)
+6. [Luồng quét](#luồng-quét)
+7. [Đối chiếu tài liệu ITS](#đối-chiếu-tài-liệu-its)
+8. [Cấu trúc mã nguồn](#cấu-trúc-mã-nguồn)
+9. [Đầu ra](#đầu-ra)
+10. [Sử dụng báo cáo](#sử-dụng-báo-cáo)
+11. [Gỡ lỗi khi kết quả thiếu/sai](#gỡ-lỗi-khi-kết-quả-thiếusai)
+12. [Ma trận kiểm thử đa ecosystem](#ma-trận-kiểm-thử-đa-ecosystem)
+13. [Tùy chọn CLI](#tùy-chọn-cli)
+14. [Lưu ý bảo mật & an toàn mã nguồn](#lưu-ý-bảo-mật--an-toàn-mã-nguồn)
+15. [Lỗi thường gặp](#lỗi-thường-gặp)
+
+---
+
+## Bắt đầu nhanh
+
+### Windows / PowerShell
 
 ```powershell
 .\run_scan.ps1 -Path "D:\Projects"
 ```
 
-Hoac chay truc tiep bang Python:
+### Mọi hệ điều hành — chạy trực tiếp bằng Python
 
-```powershell
-python autoscan.py "D:\Projects"
+```bash
+python autoscan.py "D:/Projects"
 ```
 
-Neu `D:\Projects` la mot project, tool scan mot project. Neu `D:\Projects` la folder cha chua nhieu service, tool tu scan tung service va merge report. Folder service cap 1 nao khong detect duoc marker nhu `pom.xml`/`package.json` van se duoc scan bang `trivy fs` voi kind `unknown`, de tranh bo sot folder.
+### Ý nghĩa tham số `Path`
 
-Khi chay, terminal se hien dashboard tien do:
+- Nếu `Path` trỏ tới **một project** (có `pom.xml`, `package.json`, `pubspec.yaml`, …) — công cụ quét một project.
+- Nếu `Path` trỏ tới **thư mục cha** chứa nhiều service ở cấp 1 — công cụ tự phát hiện từng service, quét song song rồi gộp báo cáo.
+- Những thư mục cấp 1 **không có marker** nhận dạng vẫn được quét bằng `trivy fs` với `kind = unknown` để tránh bỏ sót.
+
+Sau khi chạy xong, mở báo cáo tổng hợp:
+
+```text
+D:\Projects\scan-results\consolidated-report.html
+```
+
+---
+
+## Giao diện dòng lệnh
+
+Trong quá trình quét, terminal sẽ in log realtime cho **mỗi lệnh ngoài** được gọi (Maven, Gradle, npm/npx, Flutter, Trivy, …), mỗi nhóm lệnh có màu riêng:
+
+```text
+[RUN] trivy sbom --scanners vuln,license --format json ...
+[OK ] exit=0 time=1.24s trivy sbom --scanners vuln,license --format json ...
+[FAIL] exit=1 time=0.42s gradle cyclonedxBom
+```
+
+Khi quét theo lô, một **dashboard tiến độ** sẽ xuất hiện và cập nhật liên tục (xem mục kế tiếp).
+
+Sau khi hoàn tất, terminal in **tóm tắt**:
+
+```text
+Auto Scan Summary
+=================
+Root       : D:\Projects
+Run output : D:\Projects\scan-results\20260609-153000
+Projects   : 10
+OK         : 8
+FAIL       : 2
+Report     : D:\Projects\scan-results\20260609-153000\consolidated-report.html
+Stable copy: D:\Projects\scan-results\consolidated-report.html
+Debug      : D:\Projects\scan-results\20260609-153000\debug-report.md
+Stable dbg : D:\Projects\scan-results\debug-report.md
+
+[OK ] backend-api [maven]  vulns=4  licenses=87  sbom=ok
+[OK ] web-portal  [node]   vulns=2  licenses=43  sbom=ok
+[FAIL] legacy-app [gradle] vulns=0  licenses=0   sbom=fail
+       error: gradle cyclonedxBom exited with code 1
+```
+
+---
+
+## Dashboard tiến độ
+
+Dashboard tự động cập nhật mỗi khi một service hoàn tất hoặc khi bắt đầu gộp báo cáo:
 
 ```text
 Auto Scan Dashboard
@@ -32,319 +103,370 @@ Elapsed  : 03:20
 ETA      : 03:20
 ```
 
-Dashboard cap nhat sau moi service hoan tat va khi bat dau merge report.
-Moi command ngoai nhu Maven, Gradle, npm/npx, Flutter, Trivy se duoc in ra terminal voi mau rieng:
+- **Stage** — giai đoạn hiện tại: `scanning` hoặc `merging`.
+- **Progress** — thanh tiến độ dạng text + phần trăm.
+- **Status** — số service `DONE` / `OK` / `FAIL` / `RUNNING`.
+- **Elapsed / ETA** — thời gian đã chạy và thời gian ước tính còn lại.
 
-```text
-[RUN] trivy sbom --scanners vuln,license --format json ...
-[OK ] exit=0 time=1.24s trivy sbom --scanners vuln,license --format json ...
-[FAIL] exit=1 time=0.42s gradle cyclonedxBom
-```
+Có thể tắt dashboard bằng `--no-dashboard` (CLI) hoặc `-NoDashboard` (PowerShell) khi cần log gọn cho CI.
 
-Ket qua cuoi cung:
+---
 
-```text
-D:\Projects\scan-results\consolidated-report.html
-D:\Projects\scan-results\scan-summary.json
-D:\Projects\scan-results\debug-report.md
-D:\Projects\scan-results\debug-report.json
-```
+## Yêu cầu cài đặt
 
-## Kien truc file
+### Bắt buộc
 
-```text
-auto-scan-vuln-lic/
-  autoscan.py
-  run_scan.ps1
-  README.MD
+| Thành phần | Phiên bản tối thiểu | Ghi chú |
+| --- | --- | --- |
+| **Python** | **3.10+** | Công cụ dùng cú pháp `PEP 604` (`list[str] \| None`, `X \| Y`). |
+| **Trivy** | mới nhất | Phải có sẵn trong `PATH`. |
+| **PowerShell** | 5.1+ (Windows) | Chỉ cần khi dùng wrapper `run_scan.ps1`. |
 
-  autoscan/
-    __init__.py
-    batch.py
-    config.py
-    debug_report.py
-    dependency_health.py
-    detector.py
-    license_normalizer.py
-    license_rules.py
-    models.py
-    package_names.py
-    progress.py
-    scanner.py
-    sbom_generator.py
-    terminal.py
-    trivy_runner.py
-    utils.py
-    reporting/
-      __init__.py
-      merge_report.py
-      reports.py
-      single_report.py
-  tests/
-    ecosystem_matrix.py
-```
+### Khuyến nghị — để SBOM chính xác hơn theo từng hệ sinh thái
 
-Vai tro chinh:
+| Ecosystem | Công cụ ưu tiên | Fallback |
+| --- | --- | --- |
+| **Maven** | `mvnw` / `mvnw.cmd` trong project | `mvn` trong `PATH` |
+| **Gradle** | `gradlew` trong project | `gradle` trong `PATH` |
+| **Node.js** | `node`, `npm`, `npx` | — |
+| **.NET** | `dotnet` | Tự cài `dotnet-CycloneDX` nếu thiếu |
+| **Flutter** | `flutter` | — |
 
-| File | Cong dung |
-| --- | --- |
-| `autoscan.py` | Entrypoint chinh, nhan path va dieu phoi scan. |
-| `run_scan.ps1` | Wrapper PowerShell de chay mot lenh tren Windows. |
-| `autoscan/detector.py` | Tu detect Maven, Gradle, Node, Flutter, .NET, Python, Go, PHP, Ruby. |
-| `autoscan/dependency_health.py` | Detect lock file thieu/cu va mismatch giua manifest voi lock truoc khi tao SBOM. |
-| `autoscan/maven_prebuild.py` | Prebuild/install Maven lib noi bo trong cung source folder truoc khi scan service phu thuoc. |
-| `autoscan/sbom_generator.py` | Tao SBOM theo tung loai source, fallback ve `trivy fs`. |
-| `autoscan/license_normalizer.py` | Chuan hoa license SBOM ve SPDX/LicenseRef. |
-| `autoscan/license_rules.py` | Bo rule normalize license tu ten vendor/free-text ve SPDX ID. |
-| `autoscan/license_inventory.py` | Bu license tu SBOM vao report neu Trivy khong tra du license rows. |
-| `autoscan/package_names.py` | Recover package name bi thieu tu PURL, PkgID, node_modules path, license file path, Target. |
-| `autoscan/trivy_runner.py` | Chay Trivy va tao output JSON/TXT. |
-| `autoscan/scanner.py` | Scan mot project/service. |
-| `autoscan/batch.py` | Scan nhieu project/service song song va tao report tong hop. |
-| `autoscan/debug_report.py` | Tao debug report de doi chieu document, detect marker, command, SBOM/license count. |
-| `autoscan/progress.py` | Dashboard terminal hien tien do %, elapsed va ETA trong luc scan. |
-| `autoscan/terminal.py` | In command, status va mau terminal/PowerShell. |
-| `autoscan/reporting/single_report.py` | Engine sinh report HTML tung service. |
-| `autoscan/reporting/merge_report.py` | Engine sinh report HTML tong hop. |
-| `tests/ecosystem_matrix.py` | Tao fixture nhieu ecosystem de test detect/dependency-health/report recovery. |
-
-## Yeu cau cai dat
-
-Bat buoc:
-
-- Python 3
-- Trivy trong `PATH`
-- PowerShell neu dung `run_scan.ps1`
-
-Khuyen nghi de SBOM chinh xac hon theo tung ecosystem:
-
-- Maven project: `mvnw.cmd`/`mvnw` trong project hoac `mvn` trong `PATH`
-- Gradle project: `gradlew` trong project hoac `gradle` trong `PATH`
-- Node.js project: `node`, `npm`, `npx`
-- .NET project: `dotnet`, tool se tu cai `dotnet-CycloneDX` neu thieu
-- Flutter project: `flutter`
-
-Kiem tra nhanh:
+### Kiểm tra nhanh
 
 ```powershell
 python --version
 trivy --version
 ```
 
-## Loai source duoc detect
+### Cài đặt môi trường Python
 
-| Loai | Marker |
+Công cụ **chỉ dùng thư viện chuẩn** của Python, nên không cần `pip install` gì thêm. Tuy nhiên, để có một môi trường nhất quán và có thể tái lập, hãy dùng file `requirements.txt` đi kèm repo (chỉ chứa comment hướng dẫn — coi như "anchor" cho `pip install -r requirements.txt`).
+
+```bash
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# macOS / Linux
+source .venv/bin/activate
+
+pip install -r requirements.txt
+```
+
+---
+
+## Các loại mã nguồn được hỗ trợ
+
+| Hệ sinh thái | Marker nhận dạng |
 | --- | --- |
-| Maven | `pom.xml` |
-| Gradle | `build.gradle`, `build.gradle.kts`, `settings.gradle`, `gradlew` |
-| Node.js | `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb` |
-| Flutter | `pubspec.yaml` |
-| .NET | `.sln`, `.csproj` |
-| Python | `requirements.txt`, `pyproject.toml`, `Pipfile`, `poetry.lock` |
-| Go | `go.mod` |
-| PHP | `composer.json`, `composer.lock` |
-| Ruby | `Gemfile`, `Gemfile.lock` |
-| Unknown | Folder service cap 1 khong co marker, fallback `trivy fs` |
+| **Maven** | `pom.xml` |
+| **Gradle** | `build.gradle`, `build.gradle.kts`, `settings.gradle`, `settings.gradle.kts`, `gradlew`, `gradlew.bat` |
+| **Node.js** | `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb` |
+| **Flutter** | `pubspec.yaml` |
+| **.NET** | `.sln`, `.csproj` |
+| **Python** | `requirements.txt`, `pyproject.toml`, `Pipfile`, `poetry.lock` |
+| **Go** | `go.mod` |
+| **PHP** | `composer.json`, `composer.lock` |
+| **Ruby** | `Gemfile`, `Gemfile.lock` |
+| **Unknown** | Thư mục cấp 1 không có marker — fallback `trivy fs` |
 
-Neu khong co generator rieng hoac generator rieng bi fail, tool fallback ve:
+Nếu không có generator riêng hoặc generator bị lỗi, công cụ **luôn fallback** về:
 
-```powershell
+```bash
 trivy fs --format cyclonedx
 ```
 
-## Luong scan
+---
 
-Voi moi project/service:
+## Luồng quét
 
-1. Detect loai source.
-2. Luon tao moi SBOM cho lan scan hien tai, khong dung lai SBOM co san trong source de tranh ket qua bi cu khi re-scan.
-3. Prebuild Maven lib noi bo neu folder scan co nhieu Maven project phu thuoc lan nhau:
-   - Tool doc cac `pom.xml`, tim Maven project nao duoc project khac trong cung source folder tham chieu.
-   - Tool chay `mvn clean install -DskipTests -Dmaven.test.skip=true -DskipITs` cho cac lib/parent noi bo do truoc khi scan.
-   - Muc tieu la dam bao local `.m2` co du ca `.jar` va `.pom`, tranh case service scan ra dependency version cu do thieu metadata lib noi bo.
-   - Neu can bo qua buoc nay de debug nhanh: them `-SkipMavenPrebuild` voi PowerShell hoac `--skip-maven-prebuild` voi Python.
-4. Tao SBOM theo ecosystem neu co tool phu hop:
-   - Maven: `mvnw.cmd`/`mvnw` neu co, fallback `mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -DskipTests`
-   - Gradle: `gradlew cyclonedxBom` hoac `gradle cyclonedxBom`; neu thieu plugin, tool dung init script tam de apply `org.cyclonedx.bom` version `2.3.1` theo document ma khong sua source.
-   - Node.js npm lock: `npx --yes @cyclonedx/cyclonedx-npm --ignore-npm-errors --package-lock-only`
-   - Node.js yarn/pnpm/bun lock: fallback `trivy fs`
-   - .NET: `dotnet-CycloneDX <project> -j`; neu thieu tool va co `dotnet`, tool tu chay `dotnet tool install --global CycloneDX`.
-   - Flutter/Python/Go/PHP/Ruby/unknown: fallback `trivy fs`
-   - Neu generator rieng fail hoac khong tao ra SBOM moi, fallback `trivy fs --format cyclonedx`.
-5. Reconcile version trong SBOM voi version moi nhat tim duoc trong source/lock file hien co. Vi du Node co ca `package-lock.json` va `yarn.lock`, neu SBOM ra `1.80.0` nhung `package.json`/`yarn.lock` dang co `1.84.0`, tool se cap nhat SBOM len `1.84.0` truoc khi scan. Tool khong tu query registry de upgrade dependency ngoai source.
-6. Normalize license thanh `SBOM.cdx-fix.json`.
-7. Chay Trivy nhanh:
-   - Tool chi chay 1 lenh `trivy sbom --scanners vuln,license --format json` de tao `report.json`
-   - Tu `report.json`, tool tach ra `license.json`, `license.txt`, va `vuln.json`
-   - Cach nay giu du output nhu cu nhung giam so lan goi Trivy tren moi service
-8. Doi chieu license trong `SBOM.cdx-fix.json` voi `report.json`/`license.json`; neu Trivy tra thieu package license, tool tu bo sung tu SBOM. Component khong khai bao license se hien `LicenseRef-No-Declared-License` de khong bi mat im lang.
-9. Sinh:
+Với **mỗi** project / service:
+
+1. **Phát hiện loại mã nguồn** dựa trên marker.
+2. **Luôn sinh SBOM mới** cho lần quét hiện tại — *không tái sử dụng* SBOM có sẵn trong mã nguồn để tránh kết quả cũ khi quét lại.
+3. **Prebuild Maven lib nội bộ** (nếu thư mục quét có nhiều Maven project tham chiếu lẫn nhau):
+   - Đọc tất cả `pom.xml`, tìm các Maven project được tham chiếu bởi project khác trong cùng thư mục nguồn.
+   - Chạy `mvn clean install -DskipTests -Dmaven.test.skip=true -DskipITs` cho các lib / parent nội bộ trước khi quét.
+   - Mục tiêu: đảm bảo local `.m2` có đủ cả `.jar` lẫn `.pom`, tránh trường hợp service quét ra dependency version cũ vì thiếu metadata lib nội bộ.
+   - Có thể bỏ qua bước này để debug nhanh: `--skip-maven-prebuild` (CLI) hoặc `-SkipMavenPrebuild` (PowerShell).
+4. **Sinh SBOM theo ecosystem** nếu có công cụ phù hợp:
+
+   | Ecosystem | Lệnh ưu tiên | Ghi chú |
+   | --- | --- | --- |
+   | Maven | `mvnw.cmd` / `mvnw` nếu có, fallback `mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -DskipTests` | |
+   | Gradle | `gradlew cyclonedxBom` hoặc `gradle cyclonedxBom` | Nếu thiếu plugin, dùng init script tạm apply `org.cyclonedx.bom` v2.3.1 — **không sửa** `build.gradle.kts`. |
+   | Node.js (npm lock) | `npx --yes @cyclonedx/cyclonedx-npm --ignore-npm-errors --package-lock-only` | |
+   | Node.js (yarn / pnpm / bun) | fallback `trivy fs` | |
+   | .NET | `dotnet-CycloneDX <project> -j` | Nếu thiếu tool mà có `dotnet`, tự chạy `dotnet tool install --global CycloneDX`. |
+   | Flutter / Python / Go / PHP / Ruby / unknown | fallback `trivy fs` | |
+
+   Nếu generator riêng fail hoặc không sinh ra SBOM mới → fallback `trivy fs --format cyclonedx`.
+5. **Reconcile phiên bản** trong SBOM với phiên bản mới nhất tìm được trong mã nguồn / lock file hiện có. Ví dụ: Node có cả `package-lock.json` và `yarn.lock`, nếu SBOM ra `1.80.0` nhưng `package.json` / `yarn.lock` đang ở `1.84.0` — công cụ sẽ cập nhật SBOM lên `1.84.0` trước khi scan. Công cụ **không tự truy vấn registry** để nâng cấp dependency ngoài mã nguồn.
+6. **Chuẩn hóa license** thành `SBOM.cdx-fix.json`.
+7. **Chạy Trivy một lần duy nhất** cho mỗi service:
+   - `trivy sbom --scanners vuln,license --format json` → `report.json`.
+   - Từ `report.json` tách ra `license.json`, `license.txt`, `vuln.json`.
+   - Cách này giữ nguyên output như cũ nhưng giảm số lần gọi Trivy trên mỗi service.
+8. **Đối chiếu license** trong `SBOM.cdx-fix.json` với `report.json` / `license.json`; nếu Trivy trả thiếu license của package, công cụ tự bổ sung từ SBOM. Component không khai báo license sẽ hiện `LicenseRef-No-Declared-License` để không bị "mất im lặng".
+9. **Sinh báo cáo HTML** cho từng service:
    - `report.html`
    - `report-vuln.html`
-10. Merge tat ca service thanh `consolidated-report.html`.
-11. Sinh `debug-report.md/json` de doi chieu voi document va debug tung service.
+10. **Merge tất cả service** thành `consolidated-report.html`.
+11. **Sinh debug report** `debug-report.md` / `debug-report.json` để đối chiếu với tài liệu và debug từng service.
 
-## Doi chieu voi document ITS
+---
 
-Tool dang cover cac case license/dependency scan trong document, tru cac phan ban da loai khoi scope:
+## Đối chiếu tài liệu ITS
 
-| Case trong document | Cach tool cover |
+Công cụ đang cover các case license / dependency scan trong tài liệu, trừ các phần đã được loại khỏi scope:
+
+| Case trong tài liệu | Cách công cụ cover |
 | --- | --- |
-| Trivy dependency vulnerability scan | Chay `trivy sbom --scanners vuln --format json`, sau do sinh `report-vuln.html`. |
-| Gradle license scan | Chay `gradlew/gradle cyclonedxBom`; neu thieu plugin thi dung init script tam voi `org.cyclonedx.bom` version `2.3.1`. |
-| Maven license scan | Prebuild/install lib Maven noi bo trong source folder neu service khac phu thuoc, sau do chay `mvnw/mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom`. |
-| Node.js npm/package-lock license scan | Chay `npx --yes @cyclonedx/cyclonedx-npm --ignore-npm-errors`; neu co lock npm thi dung `--package-lock-only`. |
-| .NET license scan | Tu cai `CycloneDX` neu thieu, roi chay `dotnet-CycloneDX` tren `.sln`/`.csproj`. |
-| Normalize SBOM truoc khi scan license | Tao `SBOM.cdx-fix.json` bang module normalize noi bo. |
-| License TXT/JSON | Tao `license.txt` va `license.json` cho tung service. |
+| Trivy dependency vulnerability scan | Chạy `trivy sbom --scanners vuln --format json`, sau đó sinh `report-vuln.html`. |
+| Gradle license scan | Chạy `gradlew / gradle cyclonedxBom`; nếu thiếu plugin, dùng init script tạm với `org.cyclonedx.bom` v2.3.1. |
+| Maven license scan | Prebuild / install lib Maven nội bộ trong thư mục nguồn nếu service khác phụ thuộc, sau đó chạy `mvnw / mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom`. |
+| Node.js npm / package-lock license scan | Chạy `npx --yes @cyclonedx/cyclonedx-npm --ignore-npm-errors`; nếu có lock npm thì dùng `--package-lock-only`. |
+| .NET license scan | Tự cài `CycloneDX` nếu thiếu, rồi chạy `dotnet-CycloneDX` trên `.sln` / `.csproj`. |
+| Normalize SBOM trước khi scan license | Tạo `SBOM.cdx-fix.json` bằng module normalize nội bộ. |
+| License TXT / JSON | Tạo `license.txt` và `license.json` cho từng service. |
 
-Khac biet co chu dich:
+### Khác biệt có chủ đích
 
-- SBOM duoc tao moi trong `scan-results\<timestamp>` moi lan scan, khong ghi/dependency vao `third-party`, de tranh re-scan dung SBOM cu.
-- Gradle khong tu sua `build.gradle`/`build.gradle.kts`; init script tam chi nam trong output.
-- `report-vuln.html` duoc sinh tu `vuln.json` bang template noi bo thay vi `html.tpl` cua Trivy.
-- SonarQ/SonarQube va Script CI/CD/Jenkins/email dang exclude theo scope ban da chot.
+- SBOM được sinh mới trong `scan-results\<timestamp>` mỗi lần quét, **không ghi / dependency vào `third-party`** để tránh re-scan dùng SBOM cũ.
+- Gradle **không tự sửa** `build.gradle` / `build.gradle.kts`; init script tạm chỉ nằm trong thư mục output.
+- `report-vuln.html` được sinh từ `vuln.json` bằng **template nội bộ** thay vì `html.tpl` của Trivy.
+- SonarQube và script CI/CD / Jenkins / email đang được loại theo scope đã chốt.
 
-## Output
+---
 
-Vi du khi chay:
+## Cấu trúc mã nguồn
 
-```powershell
-.\run_scan.ps1 -Path "D:\Projects"
+```text
+auto-scan-vuln-lic/
+├── autoscan.py                 # Entrypoint chính, nhận path và điều phối quét
+├── run_scan.ps1                # Wrapper PowerShell trên Windows
+├── README.MD                   # File này
+├── requirements.txt            # Cài đặt môi trường Python (xem chi tiết)
+│
+├── autoscan/
+│   ├── __init__.py
+│   ├── batch.py                # Quét nhiều project / service song song và gộp báo cáo
+│   ├── config.py               # Hằng số cấu hình, marker hệ sinh thái, ignore-dir
+│   ├── debug_report.py         # Sinh debug report đối chiếu tài liệu, marker, command, count SBOM / license
+│   ├── dependency_health.py    # Phát hiện lock file thiếu / cũ và mismatch manifest ↔ lock trước khi sinh SBOM
+│   ├── detector.py             # Tự phát hiện Maven, Gradle, Node, Flutter, .NET, Python, Go, PHP, Ruby
+│   ├── license_inventory.py    # Bù license từ SBOM vào report nếu Trivy không trả đủ dòng license
+│   ├── license_normalizer.py   # Chuẩn hóa license SBOM về SPDX / LicenseRef
+│   ├── license_rules.py        # Bộ rule normalize license từ tên vendor / free-text về SPDX ID
+│   ├── maven_prebuild.py       # Prebuild / install lib Maven nội bộ trước khi quét
+│   ├── models.py               # Dataclass: Project, CommandRecord, ScanResult
+│   ├── package_names.py        # Khôi phục package name bị thiếu từ PURL, PkgID, node_modules path, license file path, Target
+│   ├── progress.py             # Dashboard terminal: tiến độ %, elapsed, ETA
+│   ├── sbom_generator.py       # Sinh SBOM theo từng loại mã nguồn, fallback `trivy fs`
+│   ├── scanner.py              # Quét một project / service
+│   ├── terminal.py             # In command, status, màu terminal / PowerShell
+│   ├── trivy_runner.py         # Chạy Trivy và sinh output JSON / TXT
+│   ├── utils.py                # Tiện ích chung: subprocess, JSON, ensure_dir, copy_file
+│   ├── version_reconciler.py   # Đối chiếu version SBOM với lock file / manifest hiện tại
+│   └── reporting/
+│       ├── __init__.py
+│       ├── merge_report.py     # Engine sinh report HTML tổng hợp
+│       ├── reports.py          # Facade gọi generator single / merged
+│       └── single_report.py    # Engine sinh report HTML cho từng service
+│
+└── tests/
+    └── ecosystem_matrix.py     # Tạo fixture nhiều ecosystem để test detect / dependency-health / report recovery
 ```
 
-Output:
+---
+
+## Đầu ra
+
+### Ví dụ khi chạy
+
+```bash
+python autoscan.py "D:/Projects"
+```
+
+### Cấu trúc thư mục kết quả
 
 ```text
 D:\Projects\scan-results\
-  consolidated-report.html
-  scan-summary.json
-  debug-report.md
-  debug-report.json
-  20260603-153000\
-    consolidated-report.html
-    scan-summary.json
-    debug-report.md
-    debug-report.json
-    services\
-      service-a\
-        SBOM.cdx.json
-        SBOM.cdx-fix.json
-        license-normalize.log
-        report.json
-        report.html
-        report-vuln.html
-        license.json
-        license.txt
-        vuln.json
-        scan.log
+├── consolidated-report.html      # Bản ổn định (ghi đè) trỏ tới lần chạy mới nhất
+├── scan-summary.json              # Bản ổn định
+├── debug-report.md                # Bản ổn định
+├── debug-report.json              # Bản ổn định
+│
+└── 20260609-153000\               # Thư mục theo timestamp mỗi lần chạy
+    ├── consolidated-report.html
+    ├── scan-summary.json
+    ├── debug-report.md
+    ├── debug-report.json
+    └── services\
+        ├── backend-api\
+        │   ├── SBOM.cdx.json
+        │   ├── SBOM.cdx-fix.json
+        │   ├── license-normalize.log
+        │   ├── report.json
+        │   ├── report.html
+        │   ├── report-vuln.html
+        │   ├── license.json
+        │   ├── license.txt
+        │   ├── vuln.json
+        │   └── scan.log
+        └── web-portal\
+            └── ...
 ```
 
-File quan trong nhat:
+### Các file quan trọng
 
-- `scan-results\consolidated-report.html`: report tong hop cuoi cung.
-- `scan-results\scan-summary.json`: summary may-doc-duoc, gom OK/FAIL, count vuln/license, path output tung service.
-- `scan-results\debug-report.md`: debug report de doc nhanh, gom doi chieu document, service detect, command da chay, count SBOM/license.
-- `scan-results\debug-report.json`: debug report dang JSON de gui/parse lai khi can trace sau.
-- `services\<service>\scan.log`: log command chi tiet de debug.
-- `services\<service>\license-normalize.log`: thong ke so component co license trong SBOM va cac license da normalize.
+| File | Vai trò |
+| --- | --- |
+| `consolidated-report.html` | Báo cáo tổng hợp cuối cùng — mở file này để xem toàn bộ. |
+| `scan-summary.json` | Tóm tắt máy-đọc-được: OK / FAIL, đếm vuln / license, path output từng service. |
+| `debug-report.md` | Debug report dạng Markdown: đối chiếu tài liệu, service phát hiện, command đã chạy, count SBOM / license. |
+| `debug-report.json` | Debug report dạng JSON — gửi / parse lại khi cần trace sau. |
+| `services\<service>\scan.log` | Log command chi tiết để debug. |
+| `services\<service>\license-normalize.log` | Thống kê số component có license trong SBOM và các license đã normalize. |
 
-## Debug khi ket qua bi thieu/sai
+---
 
-Chay dry-run truoc de xem tool detect du bao nhieu service:
+## Sử dụng báo cáo
 
-```powershell
-.\run_scan.ps1 -Path "D:\Projects" -DryRun
+Mở file:
+
+```text
+scan-results\consolidated-report.html
 ```
 
-Sau khi scan xong, mo:
+Báo cáo gồm:
+
+- **Tổng quan** vulnerability / license.
+- **Bảng vulnerability** — lọc theo package, severity, category, action.
+- **Bảng license** — lọc tương tự, không có cột category / action.
+- **Xuất Excel** — nút **Export Excel** ngay trong báo cáo.
+
+### Xuất Excel
+
+Trong báo cáo HTML có sẵn nút **Export**. File Excel sẽ được tải về máy của bạn. Đặc điểm:
+
+- Cột `Severity` được tô màu:
+  - `CRITICAL` — đỏ đậm
+  - `HIGH` — đỏ
+  - `MEDIUM` — vàng
+  - `LOW` — xanh lá
+- Mỗi package có nhiều dòng (ví dụ: nhiều CVE) thì các dòng đó được **merge** lên đầu để dễ đọc.
+- Sheet `License` **bỏ** cột `Category` và `Action`.
+
+> **Lưu ý:** nút Export Excel tải thư viện `xlsx-js-style@1.2.0` từ CDN (`cdn.jsdelivr.net`). Trình duyệt cần truy cập Internet, hoặc bạn cần cache CDN sẵn trong môi trường nội bộ.
+
+---
+
+## Gỡ lỗi khi kết quả thiếu/sai
+
+### Bước 1 — Dry-run trước
+
+Chạy dry-run để xem công cụ phát hiện được bao nhiêu service:
+
+```bash
+python autoscan.py "D:/Projects" --dry-run
+```
+
+### Bước 2 — Mở debug report
 
 ```text
 D:\Projects\scan-results\debug-report.md
 ```
 
-Trong file debug, kiem tra theo thu tu:
+Kiểm tra theo thứ tự:
 
-- `Document Coverage`: case nao dang covered, case nao khac document co chu dich, case nao excluded.
-- `Services`: service nao duoc detect, kind gi, marker nao, SBOM tao bang generator nao.
-- `Maven Prebuild`: lib/parent Maven noi bo nao da duoc `mvn clean install` truoc khi scan, command nao fail.
-- `Dependency health`: canh bao lock file thieu, dependency trong manifest khong co trong lock, hoac manifest version cao hon lock version.
-- `Commands`: command thuc te da chay va exit code.
-- `Retry/fallback note` va `Command failures`: command fail/success tiep theo, kem stderr tail, dung de xem ly do fallback.
-- `Pkg name recovery`: so dong report goc thieu package name, so dong tool recover duoc, so dong van unknown.
-- `Version updates`: so component trong SBOM duoc nang len version moi hon tim thay trong source/lock file.
-- `fixed components`: so component trong `SBOM.cdx-fix.json`; neu so nay da thieu thi loi nam o buoc tao SBOM.
-- `SBOM license rows` va `Trivy licenses`: neu SBOM co du license rows nhung Trivy thieu, tool se backfill vao report.
-
-Dependency health status hay gap:
-
-| Status | Y nghia |
+| Mục trong debug | Cần xem gì |
 | --- | --- |
-| `DEPENDENCY_HEALTH_OK` | Khong thay mismatch manifest/lock trong cac case tool ho tro. |
-| `LOCK_FILE_MISSING` | Co manifest nhu `package.json`, `pubspec.yaml`, `composer.json`, `Gemfile`, nhung thieu lock file tuong ung. |
-| `MANIFEST_LOCK_MISMATCH` | Manifest yeu cau version moi hon nhung lock van resolve version cu; scan se theo lock/SBOM. |
-| `LOCK_DEPENDENCY_MISSING` | Manifest khai bao dependency nhung lock khong co dependency do. |
-| `UNPINNED_DEPENDENCY` | Python `requirements.txt` co dependency khong pin bang `==`. |
-| `BUILD_FILE_MISSING` | Khong tim thay build/dependency manifest du de resolve dependency theo ecosystem. |
+| `Document Coverage` | Case nào đang covered, case nào khác tài liệu có chủ đích, case nào bị loại. |
+| `Services` | Service nào được phát hiện, kind gì, marker nào, SBOM sinh bằng generator nào. |
+| `Maven Prebuild` | Lib / parent Maven nội bộ nào đã được `mvn clean install` trước khi quét, command nào fail. |
+| `Dependency health` | Cảnh báo lock file thiếu, dependency trong manifest không có trong lock, hoặc manifest version cao hơn lock version. |
+| `Commands` | Command thực tế đã chạy và exit code. |
+| `Retry / fallback note` & `Command failures` | Command fail / success tiếp theo, kèm stderr tail — dùng để xem lý do fallback. |
+| `Pkg name recovery` | Số dòng report gốc thiếu package name, số dòng công cụ khôi phục được, số dòng vẫn unknown. |
+| `Version updates` | Số component trong SBOM được nâng lên version mới hơn tìm thấy trong mã nguồn / lock file. |
+| `Fixed components` | Số component trong `SBOM.cdx-fix.json`; nếu con số đã thiếu thì lỗi nằm ở bước sinh SBOM. |
+| `SBOM license rows` & `Trivy licenses` | Nếu SBOM có đủ license rows mà Trivy thiếu, công cụ sẽ backfill vào report. |
 
-## Test matrix nhieu ecosystem
+### Trạng thái dependency health hay gặp
 
-Chay test fixture local, khong can cai Maven/Gradle/Flutter/PHP/Go:
-
-```powershell
-python tests\ecosystem_matrix.py
-```
-
-Test nay tu tao source mau cho Maven, Gradle, Node, Flutter, .NET, Python, Go, PHP, Ruby va unknown source. No verify cac case:
-
-- lock file OK
-- lock file thieu
-- manifest khai bao version moi hon lock
-- dependency co trong manifest nhung thieu trong lock
-- Python dependency khong pin version
-- report recover package name bi thieu
-
-## Tuy chon CLI
-
-```powershell
-python autoscan.py "D:\Projects" --max-workers 6
-```
-
-```powershell
-python autoscan.py "D:\Projects" --recursive-depth 4
-```
-
-```powershell
-python autoscan.py "D:\Projects" --trivy-only
-```
-
-```powershell
-python autoscan.py "D:\Projects" --dry-run
-```
-
-```powershell
-python autoscan.py "D:\Projects" --no-dashboard
-```
-
-```powershell
-python autoscan.py "D:\Projects" --hide-commands --no-color
-```
-
-Y nghia:
-
-| Option | Cong dung |
+| Status | Ý nghĩa |
 | --- | --- |
-| `--max-workers` | So project scan song song. |
-| `--recursive-depth` | Do sau tim project con/nested, huu ich voi monorepo hoac frontend nam trong `apps/`, `packages/`, `frontend/`. |
-| `--trivy-only` | Bo qua generator Maven/Gradle/Node/.NET, chi dung `trivy fs`. |
-| `--skip-maven-prebuild` | Bo qua buoc `mvn clean install` cac Maven lib noi bo truoc khi scan. Chi nen dung khi debug nhanh. |
-| `--dry-run` | Chi detect project, khong chay Trivy hay tool ngoai. |
-| `--output` | Doi folder output mac dinh. |
-| `--no-dashboard` | Tat dashboard tien do trong terminal neu muon log gon. |
-| `--hide-commands` | Khong in tung command ra terminal. |
-| `--no-color` | Tat mau terminal. |
+| `DEPENDENCY_HEALTH_OK` | Không thấy mismatch manifest / lock trong các case công cụ hỗ trợ. |
+| `LOCK_FILE_MISSING` | Có manifest (`package.json`, `pubspec.yaml`, `composer.json`, `Gemfile`, …) nhưng thiếu lock file tương ứng. |
+| `MANIFEST_LOCK_MISMATCH` | Manifest yêu cầu version mới hơn nhưng lock vẫn resolve version cũ — quét sẽ theo lock / SBOM. |
+| `LOCK_DEPENDENCY_MISSING` | Manifest khai báo dependency nhưng lock không có dependency đó. |
+| `UNPINNED_DEPENDENCY` | Python `requirements.txt` có dependency không pin bằng `==`. |
+| `BUILD_FILE_MISSING` | Không tìm thấy build / dependency manifest đủ để resolve dependency theo ecosystem. |
 
-PowerShell wrapper co option tuong ung:
+---
+
+## Ma trận kiểm thử đa ecosystem
+
+Chạy test fixture local, **không cần cài** Maven / Gradle / Flutter / PHP / Go:
+
+```bash
+python tests/ecosystem_matrix.py
+```
+
+Test tự sinh mã nguồn mẫu cho **Maven, Gradle, Node, Flutter, .NET, Python, Go, PHP, Ruby** và cả `unknown source`. Nó verify các case:
+
+- Lock file OK.
+- Lock file thiếu.
+- Manifest khai báo version mới hơn lock.
+- Dependency có trong manifest nhưng thiếu trong lock.
+- Python dependency không pin version.
+- Report recover package name bị thiếu.
+
+---
+
+## Tùy chọn CLI
+
+### Một số ví dụ thường dùng
+
+```bash
+# Tăng số worker quét song song
+python autoscan.py "D:/Projects" --max-workers 6
+
+# Tăng độ sâu tìm project lồng nhau (hữu ích cho monorepo, frontend nằm trong apps/ packages/ frontend/)
+python autoscan.py "D:/Projects" --recursive-depth 4
+
+# Bỏ qua generator riêng, chỉ dùng trivy fs
+python autoscan.py "D:/Projects" --trivy-only
+
+# Chỉ detect, không chạy Trivy / tool ngoài
+python autoscan.py "D:/Projects" --dry-run
+
+# Tắt dashboard tiến độ (log gọn cho CI)
+python autoscan.py "D:/Projects" --no-dashboard
+
+# Không in từng command ra terminal, tắt màu
+python autoscan.py "D:/Projects" --hide-commands --no-color
+
+# Đổi folder output
+python autoscan.py "D:/Projects" --output "D:/Audit/scan-results"
+```
+
+### Bảng tùy chọn
+
+| Option | Mô tả |
+| --- | --- |
+| `--max-workers` | Số project quét song song. Mặc định `4`. |
+| `--recursive-depth` | Độ sâu tìm project con / lồng nhau. Mặc định `5`. |
+| `--trivy-only` | Bỏ qua generator Maven / Gradle / Node / .NET, chỉ dùng `trivy fs`. |
+| `--skip-maven-prebuild` | Bỏ qua bước `mvn clean install` các Maven lib nội bộ trước khi quét. Chỉ nên dùng khi debug nhanh. |
+| `--dry-run` | Chỉ detect project, không chạy Trivy hay tool ngoài. |
+| `--output` | Đổi folder output mặc định (`<path>/scan-results`). |
+| `--no-dashboard` | Tắt dashboard tiến độ trong terminal. |
+| `--hide-commands` | Không in từng command ra terminal. |
+| `--no-color` | Tắt màu terminal. |
+
+### PowerShell wrapper — option tương ứng
 
 ```powershell
 .\run_scan.ps1 -Path "D:\Projects" -MaxWorkers 6 -RecursiveDepth 4
@@ -355,92 +477,77 @@ PowerShell wrapper co option tuong ung:
 .\run_scan.ps1 -Path "D:\Projects" -HideCommands -NoColor
 ```
 
-## Su dung report
+---
 
-Mo file:
+## Lưu ý bảo mật & an toàn mã nguồn
 
-```text
-scan-results\consolidated-report.html
-```
+- **Không sửa mã nguồn mặc định.** Mọi artifact phụ (`build/`, `target/`, `SBOM.cdx.json`, …) đều nằm trong thư mục output.
+- **Gradle:** ưu tiên `cyclonedxBom` nếu task / plugin đã có. Nếu thiếu plugin, công cụ tạo **init script tạm** trong thư mục output để apply CycloneDX plugin theo tài liệu; **không sửa** `build.gradle.kts`.
+- **Node.js:** nếu có `package-lock.json` / `npm-shrinkwrap.json`, dùng `cyclonedx-npm --package-lock-only` để **không phụ thuộc** `node_modules`. Nếu là yarn / pnpm / bun, fallback `trivy fs` để đọc lock tương ứng. Nếu không có lock file và cũng không có `node_modules`, report chỉ dựa trên thông tin Trivy đọc được từ mã nguồn — nên commit lock file để quét đầy đủ dependency.
+- **Node.js có nhiều lock file:** reconcile SBOM theo **version cao nhất** tìm được trong `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, và `yarn.lock` để tránh lock cũ làm report ra version thấp hơn mã nguồn hiện tại.
+- **Frontend monorepo / workspace:** tiếp tục tìm project con trong `apps/`, `packages/`, `frontend/`, … thay vì dừng ở `package.json` cấp cha.
+- **Flutter mobile:** quét root Flutter và **bỏ qua** các folder platform `android`, `ios`, `web`, `windows`, `linux`, `macos` như project riêng để tránh báo cáo trùng / lặp version từ thư mục con. Package Flutter trong `packages/` vẫn được phát hiện riêng nếu có `pubspec.yaml`.
+- **Maven / Gradle / .NET:** có thể sinh file trong `target/`, `build/`, hoặc output SBOM theo cơ chế của tool gốc.
+- **Mọi command đều chạy bằng argument list** (qua `subprocess.run([...])`), **không dùng shell string concat** — tránh lỗi injection khi `path` chứa ký tự đặc biệt.
 
-Report co:
+---
 
-- Overview vulnerability/license.
-- Bang vulnerability.
-- Bang license.
-- Filter theo package, severity, category, action.
-- Export Excel.
+## Lỗi thường gặp
 
-Trong Excel:
+### Frontend quét thiếu package
 
-- Package co nhieu dong merge duoc dua len dau.
-- Cot `Severity` duoc to mau:
-  - `CRITICAL`: do dam
-  - `HIGH`: do
-  - `MEDIUM`: vang
-  - `LOW`: xanh la
-- Sheet `License` bo cot `Category` va `Action`.
+Kiểm tra theo thứ tự:
 
-## Luu y bao mat va an toan source
+1. Chạy `--dry-run` để xem công cụ có phát hiện đủ các app con (`apps/web`, `packages/ui`, `frontend/admin`, …) hay không.
+2. **Nên commit lock file** (`package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`). Nếu chỉ có `package.json`, công cụ không biết đầy đủ transitive dependency / version.
+3. Nếu app frontend nằm sâu hơn 5 cấp folder, tăng `--recursive-depth`.
+4. Nếu dùng npm và có `package-lock.json`, công cụ sẽ dùng `--package-lock-only` — **không cần** `node_modules`.
+5. Nếu terminal / CI set `NODE_ENV=production`, Node SBOM generator vẫn được chạy với `NODE_ENV` được unset để không tự omit `devDependencies`.
 
-- Tool khong tu sua source code mac dinh.
-- Gradle: tool uu tien `cyclonedxBom` neu task/plugin da co. Neu thieu plugin, tool tao init script tam trong folder output de apply CycloneDX plugin theo document; khong sua `build.gradle.kts`.
-- Node.js: neu co `package-lock.json`/`npm-shrinkwrap.json`, tool dung `cyclonedx-npm --package-lock-only` de khong phu thuoc `node_modules`. Neu la yarn/pnpm/bun, tool fallback `trivy fs` de doc lock file tuong ung. Neu khong co lock file va cung khong co `node_modules`, report chi co the dua tren thong tin Trivy doc duoc tu source; nen commit lock file de scan du dependency hon.
-- Node.js co nhieu lock file: tool reconcile SBOM theo version cao nhat tim duoc trong `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, va `yarn.lock` de tranh lock file cu lam report ra version thap hon source hien tai.
-- Frontend monorepo/workspace: tool se tiep tuc tim project con trong `apps/`, `packages/`, `frontend/`, ... thay vi dung o `package.json` cap cha.
-- Flutter mobile: tool scan root Flutter va bo qua cac folder platform `android`, `ios`, `web`, `windows`, `linux`, `macos` nhu project rieng de tranh report trung/lap version tu thu muc con. Package Flutter trong `packages/` van duoc detect rieng neu co `pubspec.yaml`.
-- Maven/Gradle/.NET co the tao file trong `target/`, `build/`, hoac output SBOM theo co che cua tool goc.
-- Tat ca command duoc chay bang argument list, khong dung shell string concat.
+### License quét thiếu package
 
-## Loi thuong gap
+Kiểm tra theo thứ tự:
 
-### Frontend scan thieu package
-
-Kiem tra cac diem sau:
-
-- Chay `--dry-run` de xem tool co detect du cac app con nhu `apps/web`, `packages/ui`, `frontend/admin` hay khong.
-- Nen commit lock file (`package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb`). Neu chi co `package.json`, tool khong the biet day du transitive dependency/version.
-- Neu app frontend nam qua sau hon 5 cap folder, tang `--recursive-depth`.
-- Neu dung npm va co `package-lock.json`, tool se dung `--package-lock-only`, nen khong can `node_modules`.
-- Neu terminal/CI set `NODE_ENV=production`, Node SBOM generator van duoc chay voi `NODE_ENV` unset de khong tu omit `devDependencies`.
-
-### License scan thieu package
-
-Kiem tra theo thu tu:
-
-- Mo `services\<service>\license-normalize.log`: dong `Components total` va `Components with licenses` cho biet SBOM co bao nhieu component/license.
-- Neu SBOM co license nhung Trivy khong tra het trong `license.json`, tool se tu them cac dong thieu tu `SBOM.cdx-fix.json` vao `report.json` va `license.json`.
-- Neu component khong co license trong SBOM, report se hien `LicenseRef-No-Declared-License` voi severity `UNKNOWN` de reviewer xu ly thu cong.
-- Neu `Components total` da thieu package, nguyen nhan nam o buoc tao SBOM/generator cua ecosystem, khong phai report.
+1. Mở `services\<service>\license-normalize.log` — dòng `Components total` và `Components with licenses` cho biết SBOM có bao nhiêu component / license.
+2. Nếu SBOM có license nhưng Trivy không trả hết trong `license.json`, công cụ **tự thêm** các dòng thiếu từ `SBOM.cdx-fix.json` vào `report.json` và `license.json`.
+3. Nếu component **không có license** trong SBOM, report sẽ hiện `LicenseRef-No-Declared-License` với severity `UNKNOWN` để reviewer xử lý thủ công.
+4. Nếu `Components total` đã thiếu package, nguyên nhân nằm ở **bước sinh SBOM / generator** của ecosystem — không phải report.
 
 ### `trivy not found in PATH`
 
-Cai Trivy va mo terminal moi:
+Cài Trivy và mở terminal mới:
 
-```powershell
+```bash
 trivy --version
 ```
 
-### Khong detect duoc project
+Hướng dẫn cài đặt chính thức: <https://trivy.dev/latest/getting-started/installation/>
 
-Chay dry-run:
+### Không phát hiện được project
 
-```powershell
-python autoscan.py "D:\Projects" --dry-run --recursive-depth 5
+Chạy dry-run:
+
+```bash
+python autoscan.py "D:/Projects" --dry-run --recursive-depth 5
 ```
 
-Neu van khong thay, kiem tra folder co file marker nhu `pom.xml`, `package.json`, `.csproj`, `go.mod`, ...
+- Nếu vẫn không thấy, kiểm tra folder có file marker (`pom.xml`, `package.json`, `.csproj`, `go.mod`, …).
+- Nếu root là folder cha chứa nhiều service, các folder cấp 1 không có marker sẽ hiện là `[unknown]` và vẫn được quét bằng `trivy fs`.
 
-Neu root la folder cha chua nhieu service, cac folder cap 1 khong co marker se hien la `[unknown]` va van duoc scan bang `trivy fs`.
+### Maven / Gradle / Node / .NET generator fail
 
-### Maven/Gradle/Node/.NET generator fail
-
-Tool se fallback ve `trivy fs` neu co the. Xem chi tiet trong:
+Công cụ sẽ fallback về `trivy fs` nếu có thể. Xem chi tiết trong:
 
 ```text
 scan-results\<timestamp>\services\<service>\scan.log
 ```
 
-### Nut Export Excel khong hoat dong
+### Nút Export Excel không hoạt động
 
-Report HTML dang tai thu vien `xlsx-js-style` tu CDN. May can truy cap internet hoac can cache CDN san.
+Report HTML đang tải thư viện `xlsx-js-style` từ CDN. Máy cần truy cập Internet, hoặc cần cache CDN sẵn trong môi trường nội bộ.
+
+---
+
+## Giấy phép
+
+Công cụ nội bộ — vui lòng tham khảo policy của tổ chức bạn về cách sử dụng và phân phối.

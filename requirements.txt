@@ -1,0 +1,78 @@
+# =============================================================================
+# Auto Scan Vulnerability & License — môi trường Python
+# =============================================================================
+#
+# Công cụ này chỉ sử dụng thư viện chuẩn của Python (stdlib), nên file này
+# không chứa package nào cần `pip install`. Nó được giữ lại với mục đích:
+#
+#   1. Làm "anchor" để `pip install -r requirements.txt` không báo lỗi
+#      trong pipeline CI/CD hoặc script setup môi trường.
+#   2. Tài liệu hóa rõ ràng yêu cầu Python và các công cụ ngoài bắt buộc.
+#   3. Dễ dàng mở rộng nếu sau này công cụ thêm dependency bên thứ ba.
+#
+# Nếu trong tương lai cần thêm package, hãy thêm trực tiếp vào đây, ví dụ:
+#
+#   openpyxl>=3.1
+#   pyyaml>=6.0
+#   requests>=2.31
+#
+# -----------------------------------------------------------------------------
+# Yêu cầu Python
+# -----------------------------------------------------------------------------
+#
+# Python 3.10 trở lên — bắt buộc. Tool sử dụng cú pháp PEP 604:
+#   - `list[str] | None`
+#   - `dict[str, tuple[...]]`
+#   - match/case ở một số nơi
+#
+# Kiểm tra:
+#   python --version
+#
+# -----------------------------------------------------------------------------
+# Công cụ ngoài (cài riêng, không qua pip)
+# -----------------------------------------------------------------------------
+#
+# 1. Trivy  — BẮT BUỘC. Dùng để scan SBOM (vuln + license) và fallback
+#             `trivy fs --format cyclonedx` khi generator riêng fail.
+#             Tải tại: https://trivy.dev/latest/getting-started/installation/
+#
+# 2. Maven  — khuyến nghị cho dự án Maven. Ưu tiên `mvnw` / `mvnw.cmd` trong
+#             project, fallback `mvn` trong PATH.
+#
+# 3. Gradle — khuyến nghị cho dự án Gradle. Ưu tiên `gradlew` trong project,
+#             fallback `gradle` trong PATH.
+#
+# 4. Node.js + npm + npx — bắt buộc cho dự án Node.js
+#             (dùng `@cyclonedx/cyclonedx-npm`).
+#
+# 5. .NET SDK + dotnet-CycloneDX — bắt buộc cho dự án .NET. Tool sẽ tự
+#             `dotnet tool install --global CycloneDX` nếu thiếu.
+#
+# 6. Flutter — khuyến nghị cho dự án Flutter (dùng `pubspec.yaml`).
+#
+# -----------------------------------------------------------------------------
+# Cài đặt môi trường khuyến nghị
+# -----------------------------------------------------------------------------
+#
+#   # 1. Tạo và kích hoạt virtualenv
+#   python -m venv .venv
+#   # Windows
+#   .venv\Scripts\activate
+#   # macOS / Linux
+#   source .venv/bin/activate
+#
+#   # 2. Cài đặt (không có package, nhưng chạy để xác nhận môi trường)
+#   pip install -r requirements.txt
+#
+#   # 3. Kiểm tra công cụ ngoài
+#   python --version
+#   trivy --version
+#
+# -----------------------------------------------------------------------------
+# Tài nguyên tham chiếu
+# -----------------------------------------------------------------------------
+#
+# - Trivy:        https://trivy.dev/
+# - CycloneDX:    https://cyclonedx.org/
+# - SPDX License: https://spdx.org/licenses/
+#
