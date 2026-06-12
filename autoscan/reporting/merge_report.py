@@ -15,7 +15,7 @@ from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
 
-from autoscan.package_names import resolve_package_name
+from autoscan.package_names import canonical_pkg_key, resolve_package_name
 
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
 
@@ -137,29 +137,42 @@ def load_all_reports(be_dir):
 
 
 def group_vulns(vuln_rows):
-    groups = defaultdict(lambda: {"folders": [], "severities": [], "rows": [], "_seen": set()})
+    groups = defaultdict(lambda: {
+        "folders": [],
+        "severities": [],
+        "rows": [],
+        "_seen_pkg": set(),
+        "_display_name": "",
+    })
     for r in vuln_rows:
-        key = r["pkg"]
+        # Use a canonical key (group/name lower-cased) so the same package
+        # spelled "ch.qos.logback/logback-classic" or "ch.qos.logback:logback-classic"
+        # ends up in the same group instead of being reported twice.
+        key = canonical_pkg_key(r.get("pkg", "")) or r.get("pkg", "")
         g = groups[key]
+        if not g["_display_name"]:
+            g["_display_name"] = r.get("pkg", "")
         if r["folder"] not in g["folders"]:
             g["folders"].append(r["folder"])
-        # Dedupe by (CVE, version) per package. A CVE affecting the same package
-        # version across multiple folders is the same vulnerability instance,
-        # so we keep only one row. Two different versions of the same package
-        # hit by the same CVE are kept as separate rows.
+        # Dedupe by (CVE, version) per package. A CVE affecting the same
+        # package version across multiple folders is the same vulnerability
+        # instance, so we keep only one row. Folder coverage is already
+        # represented in g["folders"]. Two different versions of the same
+        # package hit by the same CVE are kept as separate rows.
         version = (r.get("version") or "").strip() or "-"
         dedup_key = (r.get("cve", ""), version)
-        if dedup_key in g["_seen"]:
+        if dedup_key in g["_seen_pkg"]:
             continue
-        g["_seen"].add(dedup_key)
+        g["_seen_pkg"].add(dedup_key)
         g["severities"].append(r["severity"])
         g["rows"].append(r)
 
+    merged = _merge_no_group_entries(groups)
     result = []
-    for pkg, g in groups.items():
+    for pkg_key, g in merged.items():
         highest = get_highest_severity(g["severities"])
         result.append({
-            "pkg": pkg,
+            "pkg": g["_display_name"] or pkg_key,
             "severity": highest,
             "versions": sorted({r["version"] for r in g["rows"] if r.get("version")}),
             "fixed_versions": sorted({r["fixed"] for r in g["rows"] if r.get("fixed") and r.get("fixed") != "-"}),
@@ -169,7 +182,7 @@ def group_vulns(vuln_rows):
                 key=lambda r: (
                     SEVERITY_ORDER.get(r["severity"], 99),
                     str(r.get("cve") or "").lower(),
-                    str(r.get("folder") or "").lower(),
+                    str(r.get("version") or "").lower(),
                 ),
             ),
         })
@@ -182,14 +195,26 @@ def group_vulns(vuln_rows):
 
 
 def group_licenses(lic_rows):
-    groups = defaultdict(lambda: {"folders": [], "severities": [], "rows": [], "_seen": set()})
+    groups = defaultdict(lambda: {
+        "folders": [],
+        "severities": [],
+        "rows": [],
+        "_seen": set(),
+        "_display_name": "",
+    })
     for r in lic_rows:
-        key = r["pkg"]
+        # Use a canonical key (group/name lower-cased) so the same package
+        # spelled "ch.qos.logback/logback-classic" or "ch.qos.logback:logback-classic"
+        # ends up in the same group instead of being reported twice.
+        key = canonical_pkg_key(r.get("pkg", "")) or r.get("pkg", "")
         g = groups[key]
+        if not g["_display_name"]:
+            g["_display_name"] = r.get("pkg", "")
         if r["folder"] not in g["folders"]:
             g["folders"].append(r["folder"])
         # Dedupe exact (license, severity, category) combos per package so the
-        # same row coming from multiple folders is only kept once.
+        # same row coming from multiple folders is only kept once. Folder
+        # coverage is captured separately in g["folders"].
         dedup_key = (r.get("license", ""), r.get("severity", "UNKNOWN"), r.get("category", ""))
         if dedup_key in g["_seen"]:
             continue
@@ -197,14 +222,141 @@ def group_licenses(lic_rows):
         g["severities"].append(r["severity"])
         g["rows"].append(r)
 
+    return _finalise_license_groups(groups)
+
+
+def _leaf_pkg_name(name: str) -> str:
+    """Return just the artifact name (after the last ``/`` or ``:``)."""
+    text = str(name or "").strip().lower()
+    if not text:
+        return ""
+    for sep in ("/", ":"):
+        if sep in text:
+            return text.rsplit(sep, 1)[1]
+    return text
+
+
+def _merge_no_group_entries(groups: dict) -> dict:
+    """Fold groups whose artifact leaf name appears with and without a group.
+
+    A CycloneDX SBOM or Trivy report may emit the same Maven artifact in
+    two equivalent shapes — once with ``group + name`` fields
+    (``ch.qos.logback/logback-classic``) and once with a flattened coordinate
+    in the name field (``ch.qos.logback:logback-classic``). After
+    ``canonical_pkg_key`` those collapse, but a third shape (artifact name
+    only, e.g. ``jakarta.annotation-api``) cannot be disambiguated from a
+    real differently-grouped artifact by string rules alone.
+
+    This helper merges groups that share a leaf name *only* when the no-group
+    form is unique for that leaf. If two distinct groups (e.g.
+    ``com.lib-a/spring-core`` and ``com.lib-b/spring-core``) genuinely share
+    an artifact name, we keep them separate to avoid silently mixing
+    different artifacts.
+
+    The function preserves the per-group dedup semantics of the caller: rows
+    in each group dict are expected to already be deduplicated. The merge
+    re-applies dedup based on the row content the caller cares about —
+    for vulnerabilities that's ``(CVE, version)``; for licenses that's
+    ``(license, severity, category)``. We use a conservative key of the full
+    row's tuple of values to be safe across both call sites.
+    """
+    # Bucket groups by leaf name.
+    leaf_buckets: dict[str, list[str]] = defaultdict(list)
+    for key in groups:
+        leaf = _leaf_pkg_name(key)
+        if leaf:
+            leaf_buckets[leaf].append(key)
+
+    # Decide which groups to merge. A leaf with exactly one key, or where one
+    # key is the no-group leaf and the other is a fully-qualified form, gets
+    # merged into a single representative key. Skip the leaf bucket if more
+    # than one fully-qualified key remains — that means two different groups
+    # genuinely share an artifact name and we must keep them apart.
+    merge_target: dict[str, str] = {}
+    for leaf, keys in leaf_buckets.items():
+        if len(keys) < 2:
+            continue
+        no_group_key = leaf
+        fully_qualified = [k for k in keys if k != no_group_key and ("/" in k or ":" in k)]
+        if len(fully_qualified) >= 2:
+            # Multiple distinct groups share this artifact leaf — keep
+            # them separate to avoid silently mixing different artifacts.
+            continue
+        if fully_qualified:
+            # Merge the no-group entry into the fully-qualified one.
+            merge_target[no_group_key] = fully_qualified[0]
+        else:
+            # All entries are no-group spellings — they're the same thing.
+            primary = keys[0]
+            for k in keys[1:]:
+                merge_target[k] = primary
+
+    # Apply merges.
+    merged: dict[str, dict] = {}
+    for key, g in groups.items():
+        target_key = merge_target.get(key, key)
+        if target_key not in merged:
+            merged[target_key] = {
+                "folders": [],
+                "severities": [],
+                "rows": [],
+                "_seen": set(),
+                "_display_name": "",
+            }
+        target = merged[target_key]
+        if not target["_display_name"]:
+            # Prefer a fully-qualified display name when available.
+            target["_display_name"] = g["_display_name"]
+        for folder in g["folders"]:
+            if folder not in target["folders"]:
+                target["folders"].append(folder)
+        for sev in g["severities"]:
+            target["severities"].append(sev)
+        # Carry the per-group dedup set if the caller populated one under a
+        # different name (``_seen_pkg`` for vulnerabilities).
+        for seen_name in ("_seen", "_seen_pkg"):
+            for k in g.get(seen_name, ()):
+                target["_seen"].add(k)
+        for row in g["rows"]:
+            merged[target_key]["rows"].append(row)
+
+    # Re-dedupe rows in each merged group using the full row tuple. This
+    # is safe across call sites: for vulnerabilities the CVE+version combo
+    # is what matters; for licenses it's the (license, severity, category)
+    # combo. Using the full row tuple keeps the strongest possible dedup
+    # without losing the per-site semantics.
+    for target in merged.values():
+        seen_rows: set = set()
+        unique_rows: list = []
+        for row in target["rows"]:
+            # Frozen tuple of the values that are dedup-relevant for both
+            # call sites. We drop None / empty fields for robustness.
+            signature = (
+                row.get("cve") or row.get("license") or "",
+                row.get("version") or "",
+                row.get("severity") or "",
+                row.get("category") or "",
+            )
+            if signature in seen_rows:
+                continue
+            seen_rows.add(signature)
+            unique_rows.append(row)
+        target["rows"] = unique_rows
+
+    return merged
+
+
+def _finalise_license_groups(groups: dict) -> list[dict]:
+    """Build the final list of license groups after the no-group merge."""
+    merged = _merge_no_group_entries(groups)
     result = []
-    for pkg, g in groups.items():
+    for pkg_key, g in merged.items():
         highest = get_highest_severity(g["severities"])
         license_names = sorted({r["license"] for r in g["rows"] if r.get("license")})
         categories = sorted({r["category"] for r in g["rows"] if r.get("category")})
         action, action_color = get_license_action(highest, ",".join(categories), ",".join(license_names))
         result.append({
-            "pkg": pkg,
+            "pkg": g["_display_name"] or pkg_key,
             "license_names": license_names,
             "severity": highest,
             "categories": categories,

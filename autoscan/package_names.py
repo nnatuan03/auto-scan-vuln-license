@@ -9,6 +9,52 @@ from urllib.parse import unquote
 UNKNOWN_PACKAGE = "(unknown)"
 LOOSE_FILE_PACKAGE = "Loose File License(s)"
 
+
+def canonical_pkg_key(value: Any) -> str:
+    """Return a canonical, comparable key for a package name.
+
+    The same artifact can be referenced in SBOMs and Trivy reports in several
+    equivalent spellings:
+
+      * ``ch.qos.logback/logback-classic``  (group + slash + name)
+      * ``ch.qos.logback:logback-classic``  (Maven coordinate, colon separator)
+      * ``logback-classic``                 (name only, no group)
+
+    All three refer to the same artifact and must be merged into a single
+    report row, otherwise the consolidated report shows duplicates. This helper
+    normalises the spelling so callers can use the result as a deduplication
+    key. Falls back to the lower-cased input when no recognisable shape is
+    found. The unknown / empty sentinels are kept verbatim so they still group
+    together without being silently collapsed onto a real package name.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text in (UNKNOWN_PACKAGE, LOOSE_FILE_PACKAGE):
+        return text.lower()
+
+    lowered = text.lower()
+    # Maven coordinate: group:artifact[:version] — use only group:artifact.
+    # Skip the leading "pkg:" scheme (PURL) and anything that contains "/" or
+    # a URL scheme; those are handled by the slash branch below.
+    if (
+        ":" in lowered
+        and "/" not in lowered
+        and not lowered.startswith(("pkg:", "http:", "https:", "file:", "jar:", "cpe:"))
+    ):
+        parts = lowered.split(":")
+        if len(parts) >= 2 and parts[0] and parts[1]:
+            # Drop a trailing version (anything after the 2nd colon) so
+            # "group:artifact:1.2.3" still normalises to "group:artifact".
+            if len(parts) == 2:
+                return f"{parts[0]}/{parts[1]}"
+            return f"{parts[0]}/{parts[1]}"
+    # group/name spelling: convert to lower-case for case-insensitive match.
+    if "/" in lowered:
+        return lowered
+    return lowered
+
+
 _MISSING_VALUES = {
     "",
     "-",
