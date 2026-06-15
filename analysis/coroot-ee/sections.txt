@@ -1,0 +1,55 @@
+
+/Users/itsmac/Documents/Binary/coroot-ee:	file format elf64-littleaarch64
+
+Sections:
+Idx Name               Size     VMA              Type
+  0                    00000000 0000000000000000 
+  1 .interp            0000001b 0000000000400270 DATA
+  2 .note.gnu.build-id 00000024 000000000040028c 
+  3 .note.ABI-tag      00000020 00000000004002b0 
+  4 .note.go.buildid   00000064 00000000004002d0 
+  5 .gnu.hash          000000fc 0000000000400338 
+  6 .dynsym            00000c90 0000000000400438 
+  7 .dynstr            00000692 00000000004010c8 
+  8 .gnu.version       0000010c 000000000040175a 
+  9 .gnu.version_r     00000060 0000000000401868 
+ 10 .rela.dyn          00000078 00000000004018c8 
+ 11 .rela.plt          00000b10 0000000000401940 
+ 12 .init              00000018 0000000000402450 TEXT
+ 13 .plt               00000780 0000000000402470 TEXT
+ 14 .text              01033240 0000000000402c00 TEXT
+ 15 .fini              00000014 0000000001435e40 TEXT
+ 16 .rodata            01a3d918 0000000001435e60 DATA
+ 17 .typelink          0000ea7c 0000000002e73780 DATA
+ 18 .itablink          00003d50 0000000002e82200 DATA
+ 19 .gopclntab         00b85f40 0000000002e85f60 DATA
+ 20 .eh_frame_hdr      00003944 0000000003a0bea0 DATA
+ 21 .eh_frame          0001c3d8 0000000003a0f7e8 DATA
+ 22 .tbss              00000010 0000000003a3d770 BSS
+ 23 .init_array        00000008 0000000003a3d770 
+ 24 .fini_array        00000008 0000000003a3d778 
+ 25 .data.rel.ro       000025d0 0000000003a3d780 DATA
+ 26 .dynamic           000001e0 0000000003a3fd50 
+ 27 .got               000000b0 0000000003a3ff30 DATA
+ 28 .got.plt           000003c8 0000000003a3ffe8 DATA
+ 29 .data              00035438 0000000003a403c0 DATA
+ 30 .go.buildinfo      000027d0 0000000003a75800 DATA
+ 31 .go.fipsinfo       00000078 0000000003a77fe0 DATA
+ 32 .noptrdata         000d1c21 0000000003a78060 DATA
+ 33 .bss               0003a300 0000000003b49ca0 BSS
+ 34 .noptrbss          00024600 0000000003b83fa0 BSS
+ 35 .comment           00000027 0000000000000000 
+ 36 .debug_aranges     000001aa 0000000000000000 DEBUG
+ 37 .debug_info        004939bf 0000000000000000 DEBUG
+ 38 .debug_abbrev      00000f41 0000000000000000 DEBUG
+ 39 .debug_line        0023cc8d 0000000000000000 DEBUG
+ 40 .debug_frame       000719c0 0000000000000000 DEBUG
+ 41 .debug_str         0000a489 0000000000000000 DEBUG
+ 42 .debug_addr        000186a4 0000000000000000 DEBUG
+ 43 .debug_line_str    000002a2 0000000000000000 DEBUG
+ 44 .debug_loclists    002b90e0 0000000000000000 DEBUG
+ 45 .debug_rnglists    000dbf04 0000000000000000 DEBUG
+ 46 .debug_gdb_scripts 0000002a 0000000000000000 DEBUG
+ 47 .symtab            00181d58 0000000000000000 
+ 48 .strtab            003e8efc 0000000000000000 
+ 49 .shstrtab          00000212 0000000000000000 

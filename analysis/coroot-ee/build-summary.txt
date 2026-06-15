@@ -1,0 +1,6 @@
+buildinfo_offset	0x3665800
+go_version	go1.25.11
+path	github.com/coroot/enterprise
+mod	github.com/coroot/enterprise	(devel)	
+dep_count	108
+build_setting_count	11

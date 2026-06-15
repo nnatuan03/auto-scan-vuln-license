@@ -1,0 +1,35 @@
+{
+  "api_route_candidates_from_binary": 23,
+  "api_routes_binary_clean": 553,
+  "api_routes_final_high_confidence": 69,
+  "api_routes_from_oss_source": 71,
+  "dynamic_libraries": [
+    "liblz4.so.1",
+    "libc.so.6"
+  ],
+  "malware_indicator_counts": {
+    "download_exec": 11,
+    "dynamic_loading": 3,
+    "miner_c2": 23,
+    "native_exec_import": 210,
+    "persistence": 30,
+    "process_exec_go": 1,
+    "shell_literal": 17
+  },
+  "malware_indicator_counts_clean": {
+    "direct_native_exec_import": 0,
+    "dynamic_loading_imports": 2,
+    "go_process_exec_symbols": 0,
+    "miner_c2_keywords": 0
+  },
+  "secret_findings_by_type": {
+    "pem_certificate": 1,
+    "pem_rsa_private_key": 1,
+    "pem_rsa_testing_key": 1
+  },
+  "secret_findings_total": 3,
+  "source_paths": 2742,
+  "strings_count": 237234,
+  "unique_path_candidates": 8633,
+  "unique_urls": 992
+}

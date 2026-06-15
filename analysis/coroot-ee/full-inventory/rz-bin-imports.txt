@@ -1,0 +1,125 @@
+[Imports]
+nth      vaddr bind   type   lib name                         
+--------------------------------------------------------------
+  1 0x00402490 GLOBAL FUNC       memcpy
+  2 0x004024a0 GLOBAL FUNC       getpwnam_r
+  3 0x004024b0 GLOBAL FUNC       memmove
+  4 0x004024c0 GLOBAL FUNC       gai_strerror
+  5 0x004024d0 GLOBAL FUNC       LZ4_compress_HC
+  6 0x004024e0 GLOBAL FUNC       res_search
+  7 0x00402500 GLOBAL FUNC       freeaddrinfo
+  8 0x00402510 GLOBAL FUNC       dlerror
+  9 0x00402520 GLOBAL FUNC       setuid
+ 10 0x00402530 GLOBAL FUNC       strlen
+ 11 0x00402540 GLOBAL FUNC       __libc_start_main
+ 12 ---------- WEAK   NOTYPE     _ITM_deregisterTMCloneTable
+ 13 0x00402550 GLOBAL FUNC       getnameinfo
+ 14 0x00402570 GLOBAL FUNC       pthread_getattr_np
+ 15 0x00402590 GLOBAL FUNC       setenv
+ 16 0x004025b0 GLOBAL FUNC       pthread_attr_init
+ 17 0x004025c0 GLOBAL FUNC       fputc
+ 18 ---------- GLOBAL OBJ        stderr
+ 19 0x004025d0 GLOBAL FUNC       qsort
+ 20 0x004025e0 GLOBAL FUNC       getpwuid_r
+ 21 0x00402600 GLOBAL FUNC       sigfillset
+ 22 0x00402620 GLOBAL FUNC       localtime
+ 23 0x00402640 GLOBAL FUNC       fsync
+ 24 0x00402650 GLOBAL FUNC       getpid
+ 25 0x00402660 GLOBAL FUNC       LZ4_freeStream
+ 26 0x00402670 GLOBAL FUNC       time
+ 27 0x00402680 GLOBAL FUNC       malloc
+ 28 0x004026a0 GLOBAL FUNC       pthread_mutexattr_settype
+ 29 0x004026b0 GLOBAL FUNC       pthread_attr_destroy
+ 30 0x004026c0 GLOBAL FUNC       sigemptyset
+ 31 0x004026d0 GLOBAL FUNC       strncmp
+ 32 0x004026e0 GLOBAL FUNC       pthread_key_create
+ 33 0x004026f0 GLOBAL FUNC       memset
+ 34 0x00402700 GLOBAL FUNC       gettimeofday
+ 35 0x00402710 GLOBAL FUNC       sleep
+ 36 0x00402730 GLOBAL FUNC       pthread_mutex_trylock
+ 37 0x00402740 GLOBAL FUNC       pthread_attr_setdetachstate
+ 38 0x00402750 GLOBAL FUNC       pthread_cond_broadcast
+ 39 0x00402760 GLOBAL FUNC       realloc
+ 40 0x00402770 GLOBAL FUNC       dlopen
+ 41 0x00402780 GLOBAL FUNC       strerror
+ 42 0x00402790 GLOBAL FUNC       pthread_mutex_init
+ 43 0x004027b0 GLOBAL FUNC       sigaction
+ 44 0x004027c0 GLOBAL FUNC       strrchr
+ 45 0x004027d0 GLOBAL FUNC       pthread_attr_getstack
+ 46 0x004027e0 WEAK   NOTYPE     __gmon_start__
+ 47 0x00402800 GLOBAL FUNC       abort
+ 48 0x00402810 GLOBAL FUNC       getgrgid_r
+ 49 0x00402820 GLOBAL FUNC       setegid
+ 50 0x00402830 GLOBAL FUNC       setgid
+ 51 0x00402850 GLOBAL FUNC       LZ4_decompress_safe_continue
+ 52 0x00402860 GLOBAL FUNC       memcmp
+ 53 0x00402870 GLOBAL FUNC       sigismember
+ 54 0x00402880 GLOBAL FUNC       strcmp
+ 55 0x00402890 GLOBAL FUNC       LZ4_createStreamDecode
+ 56 0x004028a0 GLOBAL FUNC       mmap
+ 57 0x004028c0 GLOBAL FUNC       getgrnam_r
+ 58 0x004028d0 GLOBAL FUNC       setreuid
+ 59 0x004028e0 GLOBAL FUNC       free
+ 60 0x004028f0 GLOBAL FUNC       LZ4_compress_fast_continue
+ 61 0x00402900 GLOBAL FUNC       LZ4_decompress_safe
+ 62 0x00402910 GLOBAL FUNC       getgrouplist
+ 63 0x00402920 GLOBAL FUNC       pthread_cond_wait
+ 64 0x00402930 GLOBAL FUNC       nanosleep
+ 65 0x00402940 GLOBAL FUNC       pthread_sigmask
+ 66 0x00402950 GLOBAL FUNC       setregid
+ 67 0x00402960 GLOBAL FUNC       seteuid
+ 68 0x00402970 GLOBAL FUNC       fwrite
+ 69 0x00402980 GLOBAL FUNC       pthread_create
+ 70 0x004029a0 GLOBAL FUNC       setgroups
+ 71 0x004029c0 GLOBAL FUNC       pthread_mutex_destroy
+ 72 0x004029d0 GLOBAL FUNC       unsetenv
+ 73 0x004029f0 GLOBAL FUNC       getaddrinfo
+ 74 0x00402a10 GLOBAL FUNC       sysconf
+ 75 0x00402a20 GLOBAL FUNC       open64
+ 76 0x00402a30 GLOBAL FUNC       dlsym
+ 77 0x00402a40 GLOBAL FUNC       LZ4_freeStreamDecode
+ 78 0x00402a50 GLOBAL FUNC       setresuid
+ 79 0x00402a60 GLOBAL FUNC       utimes
+ 80 0x00402a70 GLOBAL FUNC       usleep
+ 81 0x00402a80 GLOBAL FUNC       LZ4_createStream
+ 82 0x00402aa0 GLOBAL FUNC       sigaddset
+ 83 ---------- WEAK   NOTYPE     _ITM_registerTMCloneTable
+ 84 0x00402ab0 GLOBAL FUNC       pthread_self
+ 85 0x00402ac0 GLOBAL FUNC       pthread_mutexattr_init
+ 86 0x00402ad0 GLOBAL FUNC       strcspn
+ 87 0x00402ae0 GLOBAL FUNC       vfprintf
+ 88 0x00402af0 GLOBAL FUNC       __errno_location
+ 89 0x00402b00 GLOBAL FUNC       pthread_join
+ 90 0x00402b10 GLOBAL FUNC       setresgid
+ 91 0x00402b30 GLOBAL FUNC       getenv
+ 92 0x00402b40 GLOBAL FUNC       LZ4_compress_default
+ 93 0x00402b50 GLOBAL FUNC       pthread_mutex_lock
+ 94 0x00402b60 GLOBAL FUNC       dlclose
+ 95 0x00402b70 GLOBAL FUNC       pthread_mutex_unlock
+ 96 0x00402b80 GLOBAL FUNC       pthread_mutexattr_destroy
+ 97 0x00402bc0 GLOBAL FUNC       fprintf
+ 98 0x00402bd0 GLOBAL FUNC       pthread_attr_getstacksize
+ 99 0x00402be0 GLOBAL FUNC       pthread_setspecific
+103 0x004025f0 GLOBAL FUNC       lstat64
+104 0x00402630 GLOBAL FUNC       ftruncate64
+105 0x00402b20 GLOBAL FUNC       mmap64
+106 0x00402ba0 GLOBAL FUNC       fchown
+107 0x004024f0 GLOBAL FUNC       getcwd
+108 0x004025a0 GLOBAL FUNC       readlink
+109 0x00402bb0 GLOBAL FUNC       mkdir
+110 0x004027f0 GLOBAL FUNC       write
+111 0x004028b0 GLOBAL FUNC       rmdir
+112 0x00402560 GLOBAL FUNC       geteuid
+113 0x00402690 GLOBAL FUNC       stat64
+116 0x00402610 GLOBAL FUNC       pread64
+118 0x00402b90 GLOBAL FUNC       unlink
+119 0x00402840 GLOBAL FUNC       access
+121 0x004029b0 GLOBAL FUNC       munmap
+125 0x004027a0 GLOBAL FUNC       close
+126 0x004029e0 GLOBAL FUNC       pwrite64
+127 0x00402720 GLOBAL FUNC       fchmod
+128 0x00402990 GLOBAL FUNC       fcntl64
+129 0x00402a90 GLOBAL FUNC       fstat64
+130 0x00402a00 GLOBAL FUNC       read
+131 0x00402580 GLOBAL FUNC       mremap
+
