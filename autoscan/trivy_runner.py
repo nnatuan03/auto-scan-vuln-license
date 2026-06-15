@@ -6,8 +6,8 @@ from typing import Any
 
 from .license_inventory import augment_report_with_sbom_licenses
 from .models import CommandRecord
-from .package_names import annotate_report_package_names
-from .utils import count_trivy_findings, load_json, run_command, tool_exists, write_json
+from .package_names import annotate_report_package_names, canonical_pkg_key
+from .utils import load_json, run_command, tool_exists, write_json
 
 
 class TrivyScanError(RuntimeError):
@@ -29,12 +29,112 @@ def _license_only_report(data: dict[str, Any]) -> dict[str, Any]:
     return copied
 
 
+def _append_unique(values: list[str], value: object, *, keep_dash: bool = False) -> None:
+    text = str(value or "").strip()
+    if not text:
+        return
+    if text == "-" and not keep_dash:
+        return
+    if text not in values:
+        values.append(text)
+
+
+def _dedupe_license_report(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, int]]:
+    copied = _license_only_report(data)
+    grouped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    raw_count = 0
+
+    for result in copied.get("Results") or []:
+        if not isinstance(result, dict):
+            continue
+        target = result.get("Target") or "-"
+        for item in result.get("Licenses") or []:
+            if not isinstance(item, dict):
+                continue
+            raw_count += 1
+            package = str(item.get("PkgName") or item.get("Package") or "").strip()
+            license_name = str(item.get("Name") or "").strip()
+            severity = str(item.get("Severity") or "UNKNOWN").strip() or "UNKNOWN"
+            category = str(item.get("Category") or "").strip()
+            key = (canonical_pkg_key(package) or package, license_name, severity, category)
+            grouped_item = grouped.setdefault(key, {
+                **item,
+                "PkgName": package,
+                "Name": license_name,
+                "Severity": severity,
+                "Category": category,
+                "Target": target,
+                "_AutoScanTargets": [],
+                "_AutoScanFilePaths": [],
+                "_AutoScanOccurrences": 0,
+            })
+            grouped_item["_AutoScanOccurrences"] += 1
+            _append_unique(grouped_item["_AutoScanTargets"], target, keep_dash=True)
+            _append_unique(grouped_item["_AutoScanFilePaths"], item.get("FilePath"))
+
+    deduped = sorted(
+        grouped.values(),
+        key=lambda row: (
+            canonical_pkg_key(row.get("PkgName") or row.get("Package") or ""),
+            str(row.get("Name") or "").lower(),
+            str(row.get("Severity") or "UNKNOWN"),
+            str(row.get("Category") or "").lower(),
+        ),
+    )
+    for item in deduped:
+        targets = item.get("_AutoScanTargets") or []
+        filepaths = item.get("_AutoScanFilePaths") or []
+        item["Target"] = "\n".join(targets) if targets else item.get("Target", "-")
+        item["FilePath"] = "\n".join(filepaths) if filepaths else item.get("FilePath", "-")
+
+    metadata = copied.setdefault("Metadata", {})
+    if isinstance(metadata, dict):
+        autoscan = metadata.setdefault("AutoScan", {})
+        if isinstance(autoscan, dict):
+            autoscan["license_deduplication"] = {
+                "raw": raw_count,
+                "unique": len(deduped),
+                "duplicates_removed": max(raw_count - len(deduped), 0),
+            }
+
+    copied["Results"] = []
+    if deduped:
+        copied["Results"].append({
+            "Target": "AutoScan License Findings",
+            "Class": "autoscan-license-deduped",
+            "Type": "autoscan",
+            "Licenses": deduped,
+        })
+    return copied, {
+        "raw": raw_count,
+        "unique": len(deduped),
+        "duplicates_removed": max(raw_count - len(deduped), 0),
+    }
+
+
 def _vuln_only_report(data: dict[str, Any]) -> dict[str, Any]:
     copied = deepcopy(data)
     for result in copied.get("Results") or []:
         if isinstance(result, dict):
             result.pop("Licenses", None)
     return copied
+
+
+def _unique_vulnerability_count(data: dict[str, Any]) -> int:
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for result in data.get("Results") or []:
+        if not isinstance(result, dict):
+            continue
+        for item in result.get("Vulnerabilities") or []:
+            if not isinstance(item, dict):
+                continue
+            package = str(item.get("PkgName") or item.get("Package") or "").strip()
+            vuln_id = str(item.get("VulnerabilityID") or item.get("Title") or "").strip()
+            installed = str(item.get("InstalledVersion") or "").strip()
+            fixed = str(item.get("FixedVersion") or "").strip()
+            severity = str(item.get("Severity") or "UNKNOWN").strip() or "UNKNOWN"
+            seen.add((canonical_pkg_key(package) or package, vuln_id, installed, fixed, severity))
+    return len(seen)
 
 
 def _license_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -69,11 +169,13 @@ def _write_license_table(data: dict[str, Any], output_path: Path) -> None:
             fh.write("\t".join(str(value).replace("\t", " ") for value in values) + "\n")
 
 
-def _derive_split_outputs(outputs: dict[str, Path]) -> None:
+def _derive_split_outputs(outputs: dict[str, Path]) -> dict[str, int]:
     data = load_json(outputs["report_json"])
-    write_json(outputs["license_json"], _license_only_report(data))
+    license_report, license_dedup_stats = _dedupe_license_report(data)
+    write_json(outputs["license_json"], license_report)
     write_json(outputs["vuln_json"], _vuln_only_report(data))
-    _write_license_table(_license_only_report(data), outputs["license_txt"])
+    _write_license_table(license_report, outputs["license_txt"])
+    return license_dedup_stats
 
 
 def scan_sbom(sbom_path: Path, output_dir: Path, log_file: Path) -> tuple[dict[str, Path], int, int, list[CommandRecord], dict[str, Any]]:
@@ -97,12 +199,15 @@ def scan_sbom(sbom_path: Path, output_dir: Path, log_file: Path) -> tuple[dict[s
     report_data = load_json(outputs["report_json"])
     package_name_stats = annotate_report_package_names(report_data)
     write_json(outputs["report_json"], report_data)
-    _derive_split_outputs(outputs)
+    license_dedup_stats = _derive_split_outputs(outputs)
     if log_file:
         with log_file.open("a", encoding="utf-8") as fh:
             fh.write(
                 "\n[license-inventory]\n"
                 f"Added {added_to_report} SBOM license rows to report.json\n"
+                f"License findings raw: {license_dedup_stats['raw']}, "
+                f"unique: {license_dedup_stats['unique']}, "
+                f"duplicates removed in license.json/license.txt: {license_dedup_stats['duplicates_removed']}\n"
                 "\n[package-name-resolution]\n"
                 f"Vulnerabilities raw missing: {package_name_stats['vulnerabilities']['raw_missing']}, "
                 f"resolved: {package_name_stats['vulnerabilities']['resolved_from_fallback']}, "
@@ -113,5 +218,6 @@ def scan_sbom(sbom_path: Path, output_dir: Path, log_file: Path) -> tuple[dict[s
                 "Derived license.json, vuln.json, and license.txt from report.json for faster scans\n"
             )
 
-    vuln_count, license_count = count_trivy_findings(outputs["report_json"])
+    vuln_count = _unique_vulnerability_count(report_data)
+    license_count = license_dedup_stats["unique"]
     return outputs, vuln_count, license_count, records, package_name_stats

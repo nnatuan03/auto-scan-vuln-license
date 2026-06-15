@@ -5,10 +5,13 @@ from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
 
-from autoscan.package_names import resolve_package_name
+from autoscan.package_names import canonical_pkg_key, resolve_package_name
+
+SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
 
 def get_highest_severity(severities):
-    SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+    if not severities:
+        return "UNKNOWN"
     return min(severities, key=lambda s: SEVERITY_ORDER.get(s, 99))
 
 def get_recommended_fix(fixed_versions_list):
@@ -91,6 +94,143 @@ def dependency_health_html(health):
   </div>"""
 
 
+def _append_unique(values, value, *, keep_dash=False):
+    text = str(value or "").strip()
+    if not text:
+        return
+    if text == "-" and not keep_dash:
+        return
+    if text not in values:
+        values.append(text)
+
+
+def _aggregate_cves_by_id(cves):
+    by_cve = {}
+    for cve_row in cves:
+        cve = str(cve_row.get("cve") or "").strip()
+        if not cve:
+            cve = str(cve_row.get("title") or "").strip() or "UNKNOWN"
+        item = by_cve.setdefault(cve, {
+            "target": cve_row.get("target", ""),
+            "pkg": cve_row.get("pkg", ""),
+            "version": cve_row.get("version", ""),
+            "fixed": "-",
+            "fixed_versions": [],
+            "cve": cve,
+            "severity": "UNKNOWN",
+            "title": "",
+            "titles": [],
+            "url": cve_row.get("url", ""),
+        })
+        item["severity"] = get_highest_severity([
+            item.get("severity") or "UNKNOWN",
+            cve_row.get("severity") or "UNKNOWN",
+        ])
+        if not item.get("url") and cve_row.get("url"):
+            item["url"] = cve_row.get("url")
+        _append_unique(item["fixed_versions"], cve_row.get("fixed"))
+        title = str(cve_row.get("title") or "").strip()
+        if title:
+            _append_unique(item["titles"], title)
+            if not item["title"]:
+                item["title"] = title
+
+    for item in by_cve.values():
+        item["fixed_versions"].sort()
+        item["titles"].sort()
+        item["fixed"] = ", ".join(item["fixed_versions"]) if item["fixed_versions"] else "-"
+        if item["titles"]:
+            item["title"] = " | ".join(item["titles"])
+    return list(by_cve.values())
+
+
+def _group_license_rows(license_rows):
+    groups = defaultdict(lambda: {
+        "targets": [],
+        "folders": [],
+        "_display_name": "",
+        "_licenses": {},
+    })
+    for row in license_rows:
+        key = canonical_pkg_key(row.get("pkg", "")) or row.get("pkg", "")
+        group = groups[key]
+        if not group["_display_name"]:
+            group["_display_name"] = row.get("pkg", "")
+
+        target = row.get("target") or "-"
+        _append_unique(group["targets"], target, keep_dash=True)
+        _append_unique(group["folders"], target, keep_dash=True)
+
+        combo = (
+            row.get("license", ""),
+            row.get("severity", "UNKNOWN"),
+            row.get("category", ""),
+        )
+        lic = group["_licenses"].setdefault(combo, {
+            "target": target,
+            "pkg": row.get("pkg", ""),
+            "license": row.get("license", ""),
+            "severity": row.get("severity", "UNKNOWN"),
+            "category": row.get("category", ""),
+            "filepath": "-",
+            "targets": [],
+            "folders": [],
+            "filepaths": [],
+        })
+        _append_unique(lic["targets"], target, keep_dash=True)
+        _append_unique(lic["folders"], target, keep_dash=True)
+        _append_unique(lic["filepaths"], row.get("filepath"))
+
+    result = []
+    for pkg_key, group in groups.items():
+        licenses = list(group["_licenses"].values())
+        for lic in licenses:
+            if not lic["targets"]:
+                lic["targets"].append("-")
+            if not lic["folders"]:
+                lic["folders"].append("-")
+            if not lic["filepaths"]:
+                lic["filepaths"].append("-")
+            lic["target"] = "\n".join(lic["targets"])
+            lic["filepath"] = "\n".join(lic["filepaths"])
+
+        licenses.sort(key=lambda row: (
+            SEVERITY_ORDER.get(row.get("severity"), 99),
+            str(row.get("license") or "").lower(),
+            str(row.get("category") or "").lower(),
+        ))
+        severities = [lic.get("severity") or "UNKNOWN" for lic in licenses]
+        highest = get_highest_severity(severities)
+        license_names = list(dict.fromkeys(lic.get("license", "") for lic in licenses if lic.get("license")))
+        categories = list(dict.fromkeys(lic.get("category", "") for lic in licenses if lic.get("category")))
+        action, action_color = get_license_action(
+            highest,
+            ",".join(categories),
+            ",".join(license_names),
+        )
+        result.append({
+            "pkg": group["_display_name"] or pkg_key,
+            "target": "\n".join(group["targets"]) if group["targets"] else "-",
+            "targets": sorted(group["targets"]),
+            "folders": sorted(group["folders"]),
+            "highest_severity": highest,
+            "severity": highest,
+            "license_names": license_names,
+            "categories": categories,
+            "action": action,
+            "action_color": action_color,
+            "lic_count": len(licenses),
+            "lics": licenses,
+            "licenses": licenses,
+        })
+    result.sort(key=lambda row: (
+        0 if row.get("lic_count", 0) > 1 else 1,
+        SEVERITY_ORDER.get(row.get("highest_severity"), 99),
+        row.get("pkg", "").lower(),
+    ))
+    return result
+
+
 def generate_html(report_path="report.json", output_path="report.html"):
     with open(report_path, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -130,14 +270,13 @@ def generate_html(report_path="report.json", output_path="report.html"):
             ).name
             license_rows.append({
                 "target": target,
+                "folder": target,
                 "pkg": pkg_name,
                 "license": lic.get("Name", ""),
                 "severity": lic.get("Severity", "UNKNOWN"),
                 "category": lic.get("Category", ""),
                 "filepath": lic.get("FilePath", "-"),
             })
-
-    SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
 
     def merged_first_group_key(row, count_key, severity_key, *text_keys):
         merged_rank = 0 if row.get(count_key, 0) > 1 else 1
@@ -154,16 +293,17 @@ def generate_html(report_path="report.json", output_path="report.html"):
 
     pkg_groups = []
     for (pkg, version, target), cves in vuln_grouped.items():
-        severities = [c["severity"] for c in cves]
+        unique_cves = _aggregate_cves_by_id(cves)
+        severities = [c["severity"] for c in unique_cves]
         highest = get_highest_severity(severities)
-        fix_to = get_recommended_fix([c["fixed"] for c in cves])
+        fix_to = get_recommended_fix([c["fixed"] for c in unique_cves])
         sev_counts = {}
         for s in severities:
             sev_counts[s] = sev_counts.get(s, 0) + 1
         pkg_groups.append({
             "pkg": pkg, "version": version, "target": target,
             "fix_to": fix_to, "highest_severity": highest,
-            "cve_count": len(cves), "sev_counts": sev_counts, "cves": cves,
+            "cve_count": len(unique_cves), "sev_counts": sev_counts, "cves": unique_cves,
         })
     pkg_groups.sort(key=lambda x: merged_first_group_key(x, "cve_count", "highest_severity", "pkg", "target"))
 
@@ -180,43 +320,21 @@ def generate_html(report_path="report.json", output_path="report.html"):
     ))
 
     # ── GROUP LICENSES ──
-    lic_grouped = defaultdict(list)
-    for lic in license_rows:
-        lic_grouped[(lic["pkg"], lic["target"])].append(lic)
-
-    lic_groups = []
-    for (pkg, target), lics in lic_grouped.items():
-        severities = [l["severity"] for l in lics]
-        highest = get_highest_severity(severities)
-        license_names = list(dict.fromkeys(l["license"] for l in lics))
-        categories = list(dict.fromkeys(l["category"] for l in lics if l["category"]))
-        action, action_color = get_license_action(
-            highest,
-            ",".join(categories),
-            ",".join(license_names),
-        )
-        lic_groups.append({
-            "pkg": pkg, "target": target,
-            "highest_severity": highest,
-            "license_names": license_names,
-            "categories": categories,
-            "action": action, "action_color": action_color,
-            "lic_count": len(lics),
-            "lics": lics,
-        })
-    lic_groups.sort(key=lambda x: merged_first_group_key(x, "lic_count", "highest_severity", "pkg", "target"))
+    lic_groups = _group_license_rows(license_rows)
 
     lic_group_sizes = {
-        (g["pkg"], g["target"]): g["lic_count"]
+        canonical_pkg_key(g["pkg"]) or g["pkg"]: g["lic_count"]
         for g in lic_groups
     }
     license_rows.sort(key=lambda x: (
-        0 if lic_group_sizes.get((x["pkg"], x["target"]), 0) > 1 else 1,
+        0 if lic_group_sizes.get(canonical_pkg_key(x["pkg"]) or x["pkg"], 0) > 1 else 1,
         SEVERITY_ORDER.get(x["severity"], 99),
         x["pkg"].lower(),
         x["license"].lower(),
         x["target"].lower(),
     ))
+    unique_vuln_count = sum(g["cve_count"] for g in pkg_groups)
+    unique_license_count = sum(g["lic_count"] for g in lic_groups)
 
     # ── SEVERITY STYLES ──
     sev_style = {
@@ -323,7 +441,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
             fixed_lines = [cv["fixed"] or "-" for cv in cves]
             title_lines = [cv["title"] for cv in cves]
             severity_attr = ",".join(unique_values(cv["severity"] for cv in cves))
-            rows += f"""<tr class="data-row" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}">
+            rows += f"""<tr class="data-row" data-count="{len(cves)}" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}">
                 <td class="pkg-name">{escape(g['pkg'])}</td>
                 <td><span class="version-tag">{escape(g['version'])}</span></td>
                 <td>{html_line_stack(cve_links)}</td>
@@ -344,11 +462,18 @@ def generate_html(report_path="report.json", output_path="report.html"):
         category_lines = [lc.get("category", "-") or "-" for lc in lics]
         action_lines = []
         for lc in lics:
-            lc_action, lc_color = get_license_action(lc["severity"], lc.get("category", ""))
+            lc_action, lc_color = get_license_action(lc["severity"], lc.get("category", ""), lc.get("license", ""))
             action_lines.append(action_chip(lc_action, lc_color))
         severity_attr = ",".join(unique_values(lc["severity"] for lc in lics))
         category_attr = ",".join(unique_values(lc.get("category", "") for lc in lics))
-        action_attr = ",".join(unique_values(action for action, _ in (get_license_action(lc["severity"], lc.get("category", "")) for lc in lics)))
+        action_attr = ",".join(unique_values(
+            action
+            for action, _ in (
+                get_license_action(lc["severity"], lc.get("category", ""), lc.get("license", ""))
+                for lc in lics
+            )
+        ))
+        target_html = line_stack(g.get("targets") or [g.get("target", "-")])
         lic_summary_rows += f"""
         <tr class="data-row lic-row" data-idx="{i}" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}" data-categories="{escape(category_attr)}" data-actions="{escape(action_attr)}" data-sev-order="{sev_order}">
             <td><span class="pkg-name">{escape(g['pkg'])}</span></td>
@@ -357,7 +482,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
             <td style="color:#4a5568;font-size:12px">{line_stack(category_lines)}</td>
             <td>{html_line_stack(action_lines)}</td>
             <td><span class="count-pill">{g['lic_count']}</span></td>
-            <td class="dim-text">{escape(g['target'])}</td>
+            <td class="dim-text">{target_html}</td>
         </tr>"""
 
     # ── LICENSE DETAIL ROWS ──
@@ -369,39 +494,53 @@ def generate_html(report_path="report.json", output_path="report.html"):
             lic_lines = [lic_chip(lc["license"]) for lc in lics]
             severity_lines = [sev_chip(lc["severity"]) for lc in lics]
             category_lines = [lc.get("category", "-") or "-" for lc in lics]
-            filepath_lines = [lc.get("filepath", "-") or "-" for lc in lics]
+            filepath_lines = [
+                "; ".join(lc.get("filepaths") or [lc.get("filepath", "-") or "-"])
+                for lc in lics
+            ]
             action_lines = []
             for lc in lics:
-                act, act_color = get_license_action(lc["severity"], lc.get("category", ""))
+                act, act_color = get_license_action(lc["severity"], lc.get("category", ""), lc.get("license", ""))
                 action_lines.append(action_chip(act, act_color))
             severity_attr = ",".join(unique_values(lc["severity"] for lc in lics))
             category_attr = ",".join(unique_values(lc.get("category", "") for lc in lics))
-            action_attr = ",".join(unique_values(action for action, _ in (get_license_action(lc["severity"], lc.get("category", "")) for lc in lics)))
-            rows += f"""<tr class="data-row" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}" data-categories="{escape(category_attr)}" data-actions="{escape(action_attr)}">
+            action_attr = ",".join(unique_values(
+                action
+                for action, _ in (
+                    get_license_action(lc["severity"], lc.get("category", ""), lc.get("license", ""))
+                    for lc in lics
+                )
+            ))
+            target_html = line_stack(g.get("targets") or [g.get("target", "-")])
+            rows += f"""<tr class="data-row" data-count="{len(lics)}" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}" data-categories="{escape(category_attr)}" data-actions="{escape(action_attr)}">
                 <td class="pkg-name">{escape(g['pkg'])}</td>
                 <td>{html_line_stack(lic_lines)}</td>
                 <td data-value="{sev_order}">{html_line_stack(severity_lines)}</td>
                 <td style="color:#4a5568;font-size:12px">{line_stack(category_lines)}</td>
                 <td>{html_line_stack(action_lines)}</td>
                 <td class="dim-text" style="font-size:11px">{line_stack(filepath_lines)}</td>
-                <td class="dim-text">{escape(g['target'])}</td>
+                <td class="dim-text">{target_html}</td>
             </tr>"""
         return rows
 
     # ── METRICS ──
-    sev_counts_total = {}
     vuln_sev = {}
-    for r in vuln_rows:
-        sev_counts_total[r["severity"]] = sev_counts_total.get(r["severity"], 0) + 1
-        vuln_sev[r["severity"]] = vuln_sev.get(r["severity"], 0) + 1
+    for group in pkg_groups:
+        for cve in group["cves"]:
+            severity = cve.get("severity") or "UNKNOWN"
+            vuln_sev[severity] = vuln_sev.get(severity, 0) + 1
 
     lic_sev = {}
-    for r in license_rows:
-        lic_sev[r["severity"]] = lic_sev.get(r["severity"], 0) + 1
+    for group in lic_groups:
+        for lic in group["lics"]:
+            severity = lic.get("severity") or "UNKNOWN"
+            lic_sev[severity] = lic_sev.get(severity, 0) + 1
 
     action_counts = {"Replace": 0, "Review": 0, "OK": 0}
     for g in lic_groups:
-        action_counts[g["action"]] = action_counts.get(g["action"], 0) + 1
+        for lic in g["lics"]:
+            action, _ = get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))
+            action_counts[action] = action_counts.get(action, 0) + 1
 
     # ── METRIC CARDS ──
     def metric_card(label, value, sub, accent):
@@ -413,7 +552,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
 
     metrics_html = ""
     for sev in ["CRITICAL", "HIGH", "MEDIUM", "LOW"]:
-        count = sev_counts_total.get(sev, 0)
+        count = vuln_sev.get(sev, 0)
         _, color = sev_style.get(sev, ("", "#718096"))
         metrics_html += metric_card(sev, count, "vulnerabilities", color)
     metrics_html += metric_card("PACKAGES", len(pkg_groups), "affected", "#3182ce")
@@ -421,7 +560,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
     metrics_html += metric_card("REVIEW", action_counts["Review"], "licenses", "#dd8500")
     metrics_html += metric_card("COMPLIANT", action_counts["OK"], "licenses", "#2d9e5f")
 
-    all_categories = sorted(set(l["category"] for l in license_rows if l.get("category")))
+    all_categories = sorted({cat for group in lic_groups for cat in group.get("categories", []) if cat})
     cat_options = "\n".join(f'<option value="{c}">{c}</option>' for c in all_categories)
 
     pkg_groups_json = json.dumps([{
@@ -1102,9 +1241,9 @@ def generate_html(report_path="report.json", output_path="report.html"):
   <div class="nav-tabs">
     <div class="nav-tab active" onclick="switchTab('overview')">Overview</div>
     <div class="nav-tab" onclick="switchTab('vuln-sum')">Vulnerability Summary</div>
-    <div class="nav-tab" onclick="switchTab('vuln-detail')">All CVEs ({len(vuln_rows)})</div>
+    <div class="nav-tab" onclick="switchTab('vuln-detail')">All CVEs ({unique_vuln_count})</div>
     <div class="nav-tab" onclick="switchTab('lic-sum')">License Summary</div>
-    <div class="nav-tab" onclick="switchTab('lic-detail')">License Detail ({len(license_rows)})</div>
+    <div class="nav-tab" onclick="switchTab('lic-detail')">License Detail ({unique_license_count})</div>
   </div>
 </div>
 
@@ -1121,7 +1260,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
       <div class="summary-block">
         <div class="summary-block-header">
           <div class="summary-block-title">License Scan Results</div>
-          <div class="summary-block-desc">Ket qua scan license cua ma nguon</div>
+          <div class="summary-block-desc">Unique license findings by severity</div>
         </div>
         <div class="summary-block-body">
           <div class="sev-stat" onclick="switchTab('lic-sum');document.getElementById('lsSevFilter').value='CRITICAL';filterLS()">
@@ -1149,7 +1288,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
       <div class="summary-block">
         <div class="summary-block-header">
           <div class="summary-block-title">Vulnerability Scan Results</div>
-          <div class="summary-block-desc">Ket qua scan lo hong dependency cua ma nguon</div>
+          <div class="summary-block-desc">Unique CVEs by severity</div>
         </div>
         <div class="summary-block-body">
           <div class="sev-stat" onclick="switchTab('vuln-sum');document.getElementById('vsSevFilter').value='CRITICAL';filterVS()">
@@ -1224,7 +1363,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
   <div class="tab-panel" id="tab-vuln-detail">
     <div class="section-header">
       <span class="section-title">All CVEs</span>
-      <span class="section-desc">Complete list — {len(vuln_rows)} entries grouped into {len(pkg_groups)} package rows</span>
+      <span class="section-desc">Complete list — {unique_vuln_count} unique CVEs from {len(vuln_rows)} raw entries grouped into {len(pkg_groups)} package rows</span>
     </div>
     <div class="toolbar">
       <input class="search-input" type="text" id="vdSearch" placeholder="Filter by package, CVE, title..." oninput="filterVD()">
@@ -1235,7 +1374,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
       <button class="btn btn-ghost" onclick="resetVD()">Reset</button>
       <div class="toolbar-right">
         <button class="btn btn-success" onclick="exportExcel()">Export Excel</button>
-        <span class="row-count" id="vdCount">{len(vuln_rows)} CVEs</span>
+        <span class="row-count" id="vdCount">{unique_vuln_count} CVEs</span>
       </div>
     </div>
     <div class="table-wrap">
@@ -1316,7 +1455,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
   <div class="tab-panel" id="tab-lic-detail">
     <div class="section-header">
       <span class="section-title">License Detail</span>
-      <span class="section-desc">Full list — {len(license_rows)} entries grouped into {len(lic_groups)} package rows</span>
+      <span class="section-desc">Full list — {unique_license_count} unique licenses from {len(license_rows)} raw entries grouped into {len(lic_groups)} package rows</span>
     </div>
     <div class="toolbar">
       <input class="search-input" type="text" id="ldSearch" placeholder="Filter by package, license..." oninput="filterLD()">
@@ -1335,7 +1474,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
       <button class="btn btn-ghost" onclick="resetLD()">Reset</button>
       <div class="toolbar-right">
         <button class="btn btn-success" onclick="exportExcel()">Export Excel</button>
-        <span class="row-count" id="ldCount">{len(lic_groups)} packages</span>
+        <span class="row-count" id="ldCount">{unique_license_count} licenses</span>
       </div>
     </div>
     <div class="table-wrap">
@@ -1461,9 +1600,9 @@ function filterVD() {{
   document.querySelectorAll('#vdBody tr').forEach(tr=>{{
     const severities = tr.dataset.severities || tr.dataset.severity || '';
     const show=(!q||tr.innerText.toLowerCase().includes(q))&&(!sev||severities.split(',').includes(sev));
-    tr.classList.toggle('hidden',!show);if(show)c++;
+    tr.classList.toggle('hidden',!show);if(show)c += parseInt(tr.dataset.count || '1', 10);
   }});
-  document.getElementById('vdCount').textContent=c+' packages';
+  document.getElementById('vdCount').textContent=c+' CVEs';
 }}
 
 function filterLS() {{
@@ -1497,9 +1636,9 @@ function filterLD() {{
     const categories = (tr.dataset.categories || '').toLowerCase().split(',');
     const actions = (tr.dataset.actions || '').toLowerCase().split(',');
     const show=(!q||text.includes(q))&&(!sev||severities.split(',').includes(sev))&&(!cat||categories.includes(cat.toLowerCase()))&&(!act||actions.includes(act.toLowerCase()));
-    tr.classList.toggle('hidden',!show);if(show)c++;
+    tr.classList.toggle('hidden',!show);if(show)c += parseInt(tr.dataset.count || '1', 10);
   }});
-  document.getElementById('ldCount').textContent=c+' packages';
+  document.getElementById('ldCount').textContent=c+' licenses';
 }}
 
 function resetVS(){{document.getElementById('vsSearch').value='';document.getElementById('vsSevFilter').value='';filterVS();}}
@@ -1649,13 +1788,15 @@ function buildComplianceSheet() {{
 function buildOverviewSheet() {{
   const SEV_COLORS = {{CRITICAL:'E53E3E',HIGH:'DD6B20',MEDIUM:'DD8500',LOW:'2D9E5F',UNKNOWN:'718096'}};
   const licSev={{}}, vulnSev={{}};
-  LIC_DATA.forEach(r=>licSev[r.severity]=(licSev[r.severity]||0)+1);
-  VULN_DATA.forEach(r=>vulnSev[r.severity]=(vulnSev[r.severity]||0)+1);
+  LIC_GROUPS.forEach(g=>(g.lics||[]).forEach(r=>licSev[r.severity]=(licSev[r.severity]||0)+1));
+  PKG_GROUPS.forEach(g=>(g.cves||[]).forEach(r=>vulnSev[r.severity]=(vulnSev[r.severity]||0)+1));
+  const licTotal = LIC_GROUPS.reduce((total,g)=>total+(g.lics||[]).length,0);
+  const vulnTotal = PKG_GROUPS.reduce((total,g)=>total+(g.cves||[]).length,0);
 
   const rows=[
     ['Scan Type','CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN','Total'],
-    ['License Scan',licSev.CRITICAL||0,licSev.HIGH||0,licSev.MEDIUM||0,licSev.LOW||0,licSev.UNKNOWN||0,LIC_DATA.length],
-    ['Vulnerability Scan',vulnSev.CRITICAL||0,vulnSev.HIGH||0,vulnSev.MEDIUM||0,vulnSev.LOW||0,vulnSev.UNKNOWN||0,VULN_DATA.length],
+    ['License Scan',licSev.CRITICAL||0,licSev.HIGH||0,licSev.MEDIUM||0,licSev.LOW||0,licSev.UNKNOWN||0,licTotal],
+    ['Vulnerability Scan',vulnSev.CRITICAL||0,vulnSev.HIGH||0,vulnSev.MEDIUM||0,vulnSev.LOW||0,vulnSev.UNKNOWN||0,vulnTotal],
   ];
   const ws=XLSX.utils.aoa_to_sheet(rows);
   ws['!cols']=[22,10,10,10,10,10,10].map(w=>{{return{{wch:w}}}});
@@ -1702,9 +1843,9 @@ function exportExcel() {{
     Path(output_path).write_text(html, encoding="utf-8")
     print(f"Report saved: {output_path}")
     print(f"  Vulnerability packages : {len(pkg_groups)}")
-    print(f"  Total CVEs             : {len(vuln_rows)}")
+    print(f"  Total CVEs             : {unique_vuln_count}")
     print(f"  License packages       : {len(lic_groups)}")
-    print(f"  Total licenses         : {len(license_rows)}")
+    print(f"  Total licenses         : {unique_license_count}")
 
 if __name__ == "__main__":
     report = sys.argv[1] if len(sys.argv) > 1 else "report.json"

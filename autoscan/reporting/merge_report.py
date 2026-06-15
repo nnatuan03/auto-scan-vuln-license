@@ -21,6 +21,8 @@ SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
 
 
 def get_highest_severity(severities):
+    if not severities:
+        return "UNKNOWN"
     return min(severities, key=lambda s: SEVERITY_ORDER.get(s, 99))
 
 
@@ -131,6 +133,7 @@ def load_all_reports(be_dir):
                     "severity": lc.get("Severity", "UNKNOWN"),
                     "category": lc.get("Category", ""),
                     "filepath": lc.get("FilePath", "-") or "-",
+                    "target":   result_target or "-",
                 })
 
     return vuln_rows, lic_rows, folders_found, health_by_folder
@@ -269,7 +272,7 @@ def group_licenses(lic_rows):
         "folders": [],
         "severities": [],
         "rows": [],
-        "_seen": set(),
+        "_licenses": {},
         "_display_name": "",
     })
     for r in lic_rows:
@@ -282,15 +285,37 @@ def group_licenses(lic_rows):
             g["_display_name"] = r.get("pkg", "")
         if r["folder"] not in g["folders"]:
             g["folders"].append(r["folder"])
-        # Dedupe exact (license, severity, category) combos per package so the
-        # same row coming from multiple folders is only kept once. Folder
-        # coverage is captured separately in g["folders"].
-        dedup_key = (r.get("license", ""), r.get("severity", "UNKNOWN"), r.get("category", ""))
-        if dedup_key in g["_seen"]:
-            continue
-        g["_seen"].add(dedup_key)
-        g["severities"].append(r["severity"])
-        g["rows"].append(r)
+        combo = (r.get("license", ""), r.get("severity", "UNKNOWN"), r.get("category", ""))
+        license_row = g["_licenses"].setdefault(combo, {
+            "folder": r.get("folder", ""),
+            "pkg": r.get("pkg", ""),
+            "license": r.get("license", ""),
+            "severity": r.get("severity", "UNKNOWN"),
+            "category": r.get("category", ""),
+            "filepath": r.get("filepath", "-") or "-",
+            "target": r.get("target", "-") or "-",
+            "folders": [],
+            "filepaths": [],
+            "targets": [],
+        })
+        _append_unique(license_row["folders"], r.get("folder"))
+        _append_unique(license_row["filepaths"], r.get("filepath"))
+        _append_unique(license_row["targets"], r.get("target"))
+
+    for g in groups.values():
+        rows = list(g["_licenses"].values())
+        for row in rows:
+            if not row["folders"]:
+                row["folders"].append(row.get("folder") or "-")
+            if not row["filepaths"]:
+                row["filepaths"].append(row.get("filepath") or "-")
+            if not row["targets"]:
+                row["targets"].append(row.get("target") or "-")
+            row["folder"] = "\n".join(row["folders"])
+            row["filepath"] = "\n".join(row["filepaths"])
+            row["target"] = "\n".join(row["targets"])
+        g["rows"] = rows
+        g["severities"] = [row.get("severity") or "UNKNOWN" for row in rows]
 
     return _finalise_license_groups(groups)
 
@@ -396,7 +421,7 @@ def _merge_no_group_entries(groups: dict) -> dict:
     # combo. Using the full row tuple keeps the strongest possible dedup
     # without losing the per-site semantics.
     for target in merged.values():
-        seen_rows: set = set()
+        seen_rows: dict[tuple, dict] = {}
         unique_rows: list = []
         for row in target["rows"]:
             # Frozen tuple of the values that are dedup-relevant for both
@@ -410,12 +435,37 @@ def _merge_no_group_entries(groups: dict) -> dict:
                 row.get("title") or "",
             )
             if signature in seen_rows:
+                existing = seen_rows[signature]
+                _merge_row_traceability(existing, row)
                 continue
-            seen_rows.add(signature)
+            _merge_row_traceability(row, row)
+            seen_rows[signature] = row
             unique_rows.append(row)
         target["rows"] = unique_rows
 
     return merged
+
+
+def _merge_row_traceability(target: dict, row: dict) -> None:
+    """Merge service, target, and filepath breadcrumbs for deduped rows."""
+    for scalar_field, list_field in (
+        ("folder", "folders"),
+        ("target", "targets"),
+        ("filepath", "filepaths"),
+    ):
+        values = target.setdefault(list_field, [])
+        if not isinstance(values, list):
+            values = [values]
+            target[list_field] = values
+        source_values = row.get(list_field)
+        if isinstance(source_values, list):
+            for value in source_values:
+                _append_unique(values, value)
+        else:
+            _append_unique(values, source_values)
+        _append_unique(values, row.get(scalar_field))
+        if values:
+            target[scalar_field] = "\n".join(values)
 
 
 def _finalise_license_groups(groups: dict) -> list[dict]:
@@ -529,11 +579,15 @@ def generate_html(be_dir, output_html):
 
     vuln_sev = defaultdict(int)
     for g in vuln_groups:
-        vuln_sev[g["severity"]] += 1
+        for vuln in g.get("vulns", []):
+            vuln_sev[vuln.get("severity") or "UNKNOWN"] += 1
 
     lic_sev = defaultdict(int)
     for g in lic_groups:
-        lic_sev[g["severity"]] += 1
+        for license_item in g.get("licenses", []):
+            lic_sev[license_item.get("severity") or "UNKNOWN"] += 1
+    total_unique_vulns = sum(len(g.get("vulns", [])) for g in vuln_groups)
+    total_unique_licenses = sum(len(g.get("licenses", [])) for g in lic_groups)
 
     def vuln_table_rows():
         rows = ""
@@ -663,11 +717,26 @@ def generate_html(be_dir, output_html):
 
     metrics = ""
     for sev in ["CRITICAL", "HIGH", "MEDIUM", "LOW"]:
-        metrics += metric_card(sev, vuln_sev.get(sev, 0), "packages", SEV_COLOR[sev])
+        metrics += metric_card(sev, vuln_sev.get(sev, 0), "CVEs", SEV_COLOR[sev])
     metrics += metric_card("SERVICES", len(folders_found), "scanned", "#3182ce")
-    metrics += metric_card("REPLACE",  sum(1 for g in lic_groups if g["action"] == "Replace"), "licenses", "#e53e3e")
-    metrics += metric_card("REVIEW",   sum(1 for g in lic_groups if g["action"] == "Review"),  "licenses", "#dd8500")
-    metrics += metric_card("OK",       sum(1 for g in lic_groups if g["action"] == "OK"),       "licenses", "#2d9e5f")
+    metrics += metric_card(
+        "REPLACE",
+        sum(1 for g in lic_groups for lic in g.get("licenses", []) if get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))[0] == "Replace"),
+        "licenses",
+        "#e53e3e",
+    )
+    metrics += metric_card(
+        "REVIEW",
+        sum(1 for g in lic_groups for lic in g.get("licenses", []) if get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))[0] == "Review"),
+        "licenses",
+        "#dd8500",
+    )
+    metrics += metric_card(
+        "OK",
+        sum(1 for g in lic_groups for lic in g.get("licenses", []) if get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))[0] == "OK"),
+        "licenses",
+        "#2d9e5f",
+    )
 
     def stat_block(sev, count, tab, filter_id, filter_fn):
         c = SEV_COLOR.get(sev, "#718096")
@@ -847,14 +916,14 @@ def generate_html(be_dir, output_html):
       <div class="summary-block">
         <div class="summary-block-header">
           <div class="summary-block-title">License Scan Results</div>
-          <div class="summary-block-desc">Package rows with license details grouped in each row</div>
+          <div class="summary-block-desc">Unique license findings by severity; package rows stay grouped below</div>
         </div>
         <div class="summary-block-body">""" + lic_stats + """</div>
       </div>
       <div class="summary-block">
         <div class="summary-block-header">
           <div class="summary-block-title">Vulnerability Scan Results</div>
-          <div class="summary-block-desc">Package rows with unique CVEs and affected services grouped together</div>
+          <div class="summary-block-desc">Unique CVEs by severity; affected services stay grouped below</div>
         </div>
         <div class="summary-block-body">""" + vuln_stats + """</div>
       </div>
@@ -1242,11 +1311,11 @@ function buildVulnSheet() {
 }
 
 function buildLicSheet() {
-  const rows = [['Package','License','Severity','Category','Action','Affected Services']];
+  const rows = [['Package','License','Severity','Category','Action','File Paths','Affected Services']];
   LIC_DATA.forEach(g => {
     const lics = [...g.licenses].sort((a,b) => sevRank(a.severity)-sevRank(b.severity));
     if (lics.length === 0) {
-      rows.push([g.pkg, '-', '-', '-', '-', g.folders.join('\\n')]);
+      rows.push([g.pkg, '-', '-', '-', '-', '-', g.folders.join('\\n')]);
       return;
     }
     rows.push([
@@ -1255,13 +1324,14 @@ function buildLicSheet() {
       lics.map(lc => lc.severity || 'UNKNOWN').join('\\n'),
       lics.map(lc => lc.category || '-').join('\\n'),
       lics.map(actionForLicense).join('\\n'),
+      lics.map(lc => joinLines(lc.filepaths || [lc.filepath || '-'])).join('\\n---\\n'),
       g.folders.join('\\n'),
     ]);
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [38,34,14,20,16,35].map(w=>({wch:w}));
-  applyHeader(ws, 6);
+  ws['!cols'] = [38,34,14,20,16,50,35].map(w=>({wch:w}));
+  applyHeader(ws, 7);
   applySeverityColors(ws, 2);
   return ws;
 }
@@ -1280,7 +1350,9 @@ function exportExcel() {
     print("Consolidated report saved: {0}".format(output_html))
     print("  Services scanned   : {0}".format(len(folders_found)))
     print("  Vulnerability package rows : {0}".format(len(vuln_groups)))
+    print("  Vulnerability findings     : {0}".format(total_unique_vulns))
     print("  License package rows       : {0}".format(len(lic_groups)))
+    print("  License findings           : {0}".format(total_unique_licenses))
 
 
 if __name__ == "__main__":

@@ -17,8 +17,9 @@ from autoscan.detector import discover_projects
 from autoscan.maven_prebuild import plan_internal_maven_prebuilds
 from autoscan.models import Project
 from autoscan.package_names import annotate_report_package_names
-from autoscan.reporting.merge_report import generate_html as generate_merged_html
+from autoscan.reporting.merge_report import generate_html as generate_merged_html, group_licenses
 from autoscan.reporting.single_report import generate_html as generate_single_html
+from autoscan.trivy_runner import _dedupe_license_report
 
 
 def write(path: Path, text: str) -> None:
@@ -297,6 +298,13 @@ def assert_report_package_name_recovery(output: Path) -> None:
                         "Name": "Apache-2.0",
                         "Severity": "LOW",
                         "Category": "notice",
+                    },
+                    {
+                        "PkgName": "@scope/ui",
+                        "FilePath": "node_modules/@scope/ui/LICENSE.copy",
+                        "Name": "MIT",
+                        "Severity": "LOW",
+                        "Category": "permissive",
                     }
                 ],
             },
@@ -325,6 +333,27 @@ def assert_report_package_name_recovery(output: Path) -> None:
 
     html = (service_dir / "report.html").read_text(encoding="utf-8")
     merged = (output / "consolidated-report.html").read_text(encoding="utf-8")
+    license_report, license_dedup = _dedupe_license_report(report)
+    license_rows = license_report["Results"][0]["Licenses"]
+    ui_license_groups = group_licenses([
+        {
+            "folder": "pkg-name-recovery",
+            "pkg": row["PkgName"],
+            "license": row["Name"],
+            "severity": row["Severity"],
+            "category": row["Category"],
+            "filepath": row.get("FilePath", "-"),
+            "target": row.get("Target", "-"),
+        }
+        for row in license_rows
+    ])
+    ui_group = next(group for group in ui_license_groups if group["pkg"] == "@scope/ui")
+    ui_mit = next(row for row in ui_group["licenses"] if row["license"] == "MIT")
+    assert license_dedup["raw"] == 4
+    assert license_dedup["unique"] == 3
+    assert len(ui_group["licenses"]) == 2
+    assert "LICENSE.copy" in "\n".join(ui_mit.get("filepaths") or [])
+
     for expected in (
         "@angular/core",
         "@scope/ui",
@@ -337,6 +366,12 @@ def assert_report_package_name_recovery(output: Path) -> None:
     assert re.search(r'<tr class="data-row lic-row"[^>]*>.*@scope/ui.*Apache-2.0.*MIT.*</tr>', html, re.S)
     assert re.search(r'<tr class="data-row lic-grp[^"]*"[^>]*>.*@angular/core.*CVE-2026-0001.*CVE-2026-0002.*</tr>', merged, re.S)
     assert re.search(r'<tr class="data-row lic-grp[^"]*"[^>]*>.*@scope/ui.*Apache-2.0.*MIT.*</tr>', merged, re.S)
+    single_license_block = re.search(r'License Scan Results.*?Vulnerability Scan Results', html, re.S).group(0)
+    merged_license_block = re.search(r'License Scan Results.*?Vulnerability Scan Results', merged, re.S).group(0)
+    assert re.search(r'sev-stat-number" style="color:#2d9e5f">02<', single_license_block)
+    assert re.search(r'sev-stat-number" style="color:#2d9e5f">02<', merged_license_block)
+    assert re.search(r'sev-stat-number" style="color:#dd8500">01<', single_license_block)
+    assert re.search(r'sev-stat-number" style="color:#dd8500">01<', merged_license_block)
 
 
 def main() -> int:
