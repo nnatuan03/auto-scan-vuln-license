@@ -154,13 +154,18 @@ def group_vulns(vuln_rows):
             g["_display_name"] = r.get("pkg", "")
         if r["folder"] not in g["folders"]:
             g["folders"].append(r["folder"])
-        # Dedupe by (CVE, version) per package. A CVE affecting the same
-        # package version across multiple folders is the same vulnerability
-        # instance, so we keep only one row. Folder coverage is already
-        # represented in g["folders"]. Two different versions of the same
-        # package hit by the same CVE are kept as separate rows.
+        # Keep only exact duplicate rows at this stage. The final report
+        # aggregates by CVE below so each package shows every CVE only once,
+        # while still preserving all unique installed/fixed versions.
         version = (r.get("version") or "").strip() or "-"
-        dedup_key = (r.get("cve", ""), version)
+        fixed = (r.get("fixed") or "").strip() or "-"
+        dedup_key = (
+            r.get("cve", ""),
+            version,
+            fixed,
+            r.get("severity", "UNKNOWN"),
+            r.get("title", ""),
+        )
         if dedup_key in g["_seen_pkg"]:
             continue
         g["_seen_pkg"].add(dedup_key)
@@ -170,19 +175,30 @@ def group_vulns(vuln_rows):
     merged = _merge_no_group_entries(groups)
     result = []
     for pkg_key, g in merged.items():
-        highest = get_highest_severity(g["severities"])
+        vulns = _aggregate_vulns_by_cve(g["rows"])
+        severities = [v["severity"] for v in vulns] or ["UNKNOWN"]
+        highest = get_highest_severity(severities)
         result.append({
             "pkg": g["_display_name"] or pkg_key,
             "severity": highest,
-            "versions": sorted({r["version"] for r in g["rows"] if r.get("version")}),
-            "fixed_versions": sorted({r["fixed"] for r in g["rows"] if r.get("fixed") and r.get("fixed") != "-"}),
+            "versions": sorted({
+                version
+                for v in vulns
+                for version in v.get("versions", [])
+                if version and version != "-"
+            }),
+            "fixed_versions": sorted({
+                fixed
+                for v in vulns
+                for fixed in v.get("fixed_versions", [])
+                if fixed and fixed != "-"
+            }),
             "folders": sorted(g["folders"]),
             "vulns": sorted(
-                g["rows"],
+                vulns,
                 key=lambda r: (
                     SEVERITY_ORDER.get(r["severity"], 99),
                     str(r.get("cve") or "").lower(),
-                    str(r.get("version") or "").lower(),
                 ),
             ),
         })
@@ -192,6 +208,60 @@ def group_vulns(vuln_rows):
         x["pkg"].lower(),
     ))
     return result
+
+
+def _append_unique(values: list[str], value: object, *, keep_dash: bool = False) -> None:
+    text = str(value or "").strip()
+    if not text:
+        return
+    if text == "-" and not keep_dash:
+        return
+    if text not in values:
+        values.append(text)
+
+
+def _aggregate_vulns_by_cve(rows: list[dict]) -> list[dict]:
+    """Collapse repeated package findings so each CVE appears once."""
+    by_cve: dict[str, dict] = {}
+    for row in rows:
+        cve = str(row.get("cve") or "").strip()
+        if not cve:
+            cve = str(row.get("title") or "").strip() or "UNKNOWN"
+        item = by_cve.setdefault(cve, {
+            "cve": cve,
+            "severity": "UNKNOWN",
+            "versions": [],
+            "fixed_versions": [],
+            "folders": [],
+            "titles": [],
+            "title": "",
+            "url": row.get("url", ""),
+        })
+        item["severity"] = get_highest_severity([
+            item.get("severity") or "UNKNOWN",
+            row.get("severity") or "UNKNOWN",
+        ])
+        if not item.get("url") and row.get("url"):
+            item["url"] = row.get("url")
+        _append_unique(item["versions"], row.get("version"), keep_dash=True)
+        _append_unique(item["fixed_versions"], row.get("fixed"))
+        _append_unique(item["folders"], row.get("folder"))
+        title = str(row.get("title") or "").strip()
+        if title:
+            _append_unique(item["titles"], title)
+            if not item["title"]:
+                item["title"] = title
+
+    for item in by_cve.values():
+        if not item["versions"]:
+            item["versions"].append("-")
+        item["versions"].sort()
+        item["fixed_versions"].sort()
+        item["folders"].sort()
+        item["version"] = "\n".join(item["versions"])
+        item["fixed"] = "\n".join(item["fixed_versions"]) if item["fixed_versions"] else "-"
+
+    return list(by_cve.values())
 
 
 def group_licenses(lic_rows):
@@ -334,8 +404,10 @@ def _merge_no_group_entries(groups: dict) -> dict:
             signature = (
                 row.get("cve") or row.get("license") or "",
                 row.get("version") or "",
+                row.get("fixed") or "",
                 row.get("severity") or "",
                 row.get("category") or "",
+                row.get("title") or "",
             )
             if signature in seen_rows:
                 continue
@@ -471,36 +543,72 @@ def generate_html(be_dir, output_html):
             x["pkg"].lower(),
         ))
         for group_index, r in enumerate(sorted_vulns):
-            so = ORDER.get(r["severity"], 99)
             group_bg = "grp-even" if (group_index % 2 == 0) else "grp-odd"
             vulns = r["vulns"]
-            cve_lines = [
-                '<a href="{0}" target="_blank" class="cve-link">{1}</a>'.format(
-                    escape(v.get("url", "")),
-                    escape(v.get("cve", "")),
-                )
-                for v in vulns
-            ]
-            severity_lines = [sev_chip(v["severity"]) for v in vulns]
-            version_lines = unique_values(v.get("version", "") for v in vulns)
-            fixed_lines = [v.get("fixed") or "-" for v in vulns]
-            title_lines = [str(v.get("title") or "")[:120] for v in vulns]
+            if not vulns:
+                vulns = [{
+                    "cve": "-",
+                    "severity": r.get("severity") or "UNKNOWN",
+                    "url": "",
+                    "versions": r.get("versions") or ["-"],
+                    "fixed_versions": r.get("fixed_versions") or [],
+                    "titles": [],
+                }]
+            rowspan = len(vulns)
+            version_lines = r.get("versions") or ["-"]
+            fixed_lines = r.get("fixed_versions") or ["-"]
             severity_attr = ",".join(unique_values(v.get("severity", "") for v in vulns))
-            rows += '<tr class="data-row lic-grp {8} grp-end" data-severity="{0}" data-severities="{9}" data-pkg="{10}"><td class="pkg-name">{1}</td><td>{2}</td><td data-value="{3}">{4}</td><td>{5}</td><td>{6}</td><td>{7}</td><td style="color:#4a5568;font-size:12px;max-width:360px">{11}</td></tr>'.format(
-                r["severity"],
-                escape(r["pkg"]),
-                html_line_stack(cve_lines),
-                so,
-                html_line_stack(severity_lines),
-                line_stack(version_lines),
-                line_stack(fixed_lines),
-                paths_html(r["folders"]),
+            cve_sort = " ".join(v.get("cve", "") for v in vulns)
+            search_text = " ".join([
+                r["pkg"],
+                cve_sort,
+                severity_attr,
+                " ".join(version_lines),
+                " ".join(fixed_lines),
+                " ".join(r["folders"]),
+                " ".join(title for v in vulns for title in v.get("titles", [])),
+            ])
+            rows += '<tbody class="vuln-group {0}" data-severity="{1}" data-severities="{2}" data-pkg="{3}" data-search="{4}" data-sort-package="{5}" data-sort-cve="{6}" data-sort-severity="{7}" data-sort-installed="{8}" data-sort-fix="{9}" data-sort-services="{10}">'.format(
                 group_bg,
+                escape(r["severity"]),
                 escape(severity_attr),
                 escape(r["pkg"]),
-                line_stack(title_lines),
+                escape(search_text.lower()),
+                escape(r["pkg"].lower()),
+                escape(cve_sort.lower()),
+                ORDER.get(r["severity"], 99),
+                escape(" ".join(version_lines).lower()),
+                escape(" ".join(fixed_lines).lower()),
+                escape(" ".join(r["folders"]).lower()),
             )
-        return rows or '<tr><td colspan="7" class="no-data">No vulnerabilities found.</td></tr>'
+            for vuln_index, v in enumerate(vulns):
+                severity = v.get("severity") or "UNKNOWN"
+                row_class = "grp-end" if vuln_index == rowspan - 1 else "grp-mid"
+                cve_label = escape(v.get("cve") or "-")
+                cve_url = escape(v.get("url") or "")
+                cve_html = '<a href="{0}" target="_blank" class="cve-link">{1}</a>'.format(cve_url, cve_label) if cve_url else cve_label
+                rows += '<tr class="data-row lic-grp vuln-row {0} {1}" data-severity="{2}" data-severities="{3}" data-pkg="{4}">'.format(
+                    group_bg,
+                    row_class,
+                    escape(severity),
+                    escape(severity_attr),
+                    escape(r["pkg"]),
+                )
+                if vuln_index == 0:
+                    rows += '<td class="pkg-name vuln-merged-cell" rowspan="{0}">{1}</td>'.format(rowspan, escape(r["pkg"]))
+                rows += '<td>{0}</td>'.format(cve_html)
+                rows += '<td class="severity-cell severity-{0}" data-value="{1}">{2}</td>'.format(
+                    escape(severity.lower()),
+                    ORDER.get(severity, 99),
+                    escape(severity),
+                )
+                if vuln_index == 0:
+                    rows += '<td class="vuln-merged-cell" rowspan="{0}">{1}</td>'.format(rowspan, line_stack(version_lines))
+                    rows += '<td class="vuln-merged-cell" rowspan="{0}">{1}</td>'.format(rowspan, line_stack(fixed_lines))
+                    rows += '<td class="vuln-merged-cell" rowspan="{0}">{1}</td>'.format(rowspan, line_stack(r["folders"]))
+                rows += '</tr>'
+            rows += '</tbody>'
+        return rows or '<tbody class="vuln-empty"><tr><td colspan="6" class="no-data">No vulnerabilities found.</td></tr></tbody>'
 
     def lic_table_rows():
         rows = ""
@@ -662,6 +770,14 @@ def generate_html(be_dir, output_html):
   .lic-grp.grp-odd  td{background:#f4f8fc}
   /* Hover highlights the whole hovered row regardless of group color */
   .lic-grp:hover td{background:#eaf2fb}
+  tbody.vuln-group.hidden{display:none}
+  .vuln-merged-cell{vertical-align:middle}
+  .severity-cell{font-weight:700;color:#fff;text-align:left;vertical-align:middle;letter-spacing:.03em}
+  .severity-critical{background:#8b0000!important}
+  .severity-high{background:#ff0000!important}
+  .severity-medium{background:#ffc000!important}
+  .severity-low{background:#92d050!important;color:#fff}
+  .severity-unknown{background:#718096!important;color:#fff}
   .no-data{text-align:center;padding:48px;color:var(--text-muted);font-size:13px}
   .pkg-name{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:var(--navy-800)}
   .cve-link{font-family:'IBM Plex Mono',monospace;font-size:12px;color:#2563eb;text-decoration:none;font-weight:500}
@@ -738,7 +854,7 @@ def generate_html(be_dir, output_html):
       <div class="summary-block">
         <div class="summary-block-header">
           <div class="summary-block-title">Vulnerability Scan Results</div>
-          <div class="summary-block-desc">Package rows with CVE details grouped in each row</div>
+          <div class="summary-block-desc">Package rows with unique CVEs and affected services grouped together</div>
         </div>
         <div class="summary-block-body">""" + vuln_stats + """</div>
       </div>
@@ -748,10 +864,10 @@ def generate_html(be_dir, output_html):
   <div class="tab-panel" id="tab-vuln">
     <div class="section-header">
       <span class="section-title">Vulnerabilities</span>
-      <span class="section-desc">""" + str(len(vuln_groups)) + """ package rows &mdash; CVEs, severities, fixes, and titles are grouped per package</span>
+      <span class="section-desc">""" + str(len(vuln_groups)) + """ package rows &mdash; unique CVEs, severities, fixes, and affected services are grouped per package</span>
     </div>
     <div class="toolbar">
-      <input class="search-input" type="text" id="vulnSearch" placeholder="Filter by package, CVE, title..." oninput="filterVuln()">
+      <input class="search-input" type="text" id="vulnSearch" placeholder="Filter by package, CVE, service..." oninput="filterVuln()">
       <select class="filter-select" id="vulnSevFilter" onchange="filterVuln()">
         <option value="">All Severities</option>
         <option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option><option>UNKNOWN</option>
@@ -765,15 +881,14 @@ def generate_html(be_dir, output_html):
     <div class="table-wrap"><div class="table-scroll">
     <table id="vulnTable">
       <thead><tr>
-        <th onclick="sortTable('vulnTable',0)">Package <span class="si">&#8645;</span></th>
-        <th onclick="sortTable('vulnTable',1)">CVE ID <span class="si">&#8645;</span></th>
-        <th onclick="sortTable('vulnTable',2)">Severity <span class="si">&#8645;</span></th>
-        <th onclick="sortTable('vulnTable',3)">Installed <span class="si">&#8645;</span></th>
-        <th onclick="sortTable('vulnTable',4)">Fix To <span class="si">&#8645;</span></th>
-        <th>Affected Services</th>
-        <th>Title</th>
+        <th onclick="sortVulnTable(0)">Package <span class="si">&#8645;</span></th>
+        <th onclick="sortVulnTable(1)">CVE ID <span class="si">&#8645;</span></th>
+        <th onclick="sortVulnTable(2)">Severity <span class="si">&#8645;</span></th>
+        <th onclick="sortVulnTable(3)">Installed <span class="si">&#8645;</span></th>
+        <th onclick="sortVulnTable(4)">Fix To <span class="si">&#8645;</span></th>
+        <th onclick="sortVulnTable(5)">Affected Services <span class="si">&#8645;</span></th>
       </tr></thead>
-      <tbody id="vulnBody">""" + vuln_table_rows() + """</tbody>
+      """ + vuln_table_rows() + """
     </table>
     </div></div>
   </div>
@@ -878,15 +993,35 @@ function sortTable(tableId, col) {
   });
 }
 
+function sortVulnTable(col) {
+  const table = document.getElementById('vulnTable');
+  const groups = Array.from(table.querySelectorAll('tbody.vuln-group'));
+  const key = 'vuln' + col;
+  const asc = sortState[key] = !sortState[key];
+  const sortKeys = ['package', 'cve', 'severity', 'installed', 'fix', 'services'];
+  const sortKey = sortKeys[col] || 'package';
+  groups.sort((a, b) => {
+    const aVal = a.dataset['sort' + sortKey.charAt(0).toUpperCase() + sortKey.slice(1)] || '';
+    const bVal = b.dataset['sort' + sortKey.charAt(0).toUpperCase() + sortKey.slice(1)] || '';
+    const aNum = parseFloat(aVal), bNum = parseFloat(bVal);
+    if (!isNaN(aNum) && !isNaN(bNum)) return asc ? aNum - bNum : bNum - aNum;
+    return asc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+  });
+  groups.forEach(group => table.appendChild(group));
+  document.querySelectorAll('#vulnTable th .si').forEach((el, i) => {
+    el.textContent = i === col ? (asc ? '↑' : '↓') : '⇅';
+  });
+}
+
 function filterVuln() {
   const q = document.getElementById('vulnSearch').value.toLowerCase();
   const sev = document.getElementById('vulnSevFilter').value;
   let c = 0;
-  document.querySelectorAll('#vulnBody tr').forEach(tr => {
-    const text = (tr.innerText + ' ' + (tr.dataset.pkg || '')).toLowerCase();
-    const severities = tr.dataset.severities || tr.dataset.severity || '';
+  document.querySelectorAll('#vulnTable tbody.vuln-group').forEach(group => {
+    const text = group.dataset.search || group.innerText.toLowerCase();
+    const severities = group.dataset.severities || group.dataset.severity || '';
     const show = (!q || text.includes(q)) && (!sev || severities.split(',').includes(sev));
-    tr.classList.toggle('hidden', !show);
+    group.classList.toggle('hidden', !show);
     if (show) c++;
   });
   document.getElementById('vulnCount').textContent = c + ' packages';
@@ -925,7 +1060,15 @@ const SEVERITY_STYLES = {
   CRITICAL: { fill: '8B0000', font: 'FFFFFF' },
   HIGH:     { fill: 'FF0000', font: 'FFFFFF' },
   MEDIUM:   { fill: 'FFD966', font: '000000' },
-  LOW:      { fill: '92D050', font: '000000' }
+  LOW:      { fill: '92D050', font: '000000' },
+  UNKNOWN:  { fill: '718096', font: 'FFFFFF' }
+};
+const VULN_SEVERITY_STYLES = {
+  CRITICAL: { fill: '8B0000', font: 'FFFFFF' },
+  HIGH:     { fill: 'FF0000', font: 'FFFFFF' },
+  MEDIUM:   { fill: 'FFC000', font: 'FFFFFF' },
+  LOW:      { fill: '92D050', font: 'FFFFFF' },
+  UNKNOWN:  { fill: '718096', font: 'FFFFFF' }
 };
 
 function sevRank(severity) {
@@ -947,42 +1090,85 @@ function sortedPackagesByMergedFirst(byPkg) {
   });
 }
 
-function applyHeader(ws, totalCols) {
+function applyHeader(ws, totalCols, horizontal = 'center') {
   for (let c=0; c<totalCols; c++) {
     const ref = colRef(c)+'1';
     if (!ws[ref]) continue;
-    ws[ref].s = {
+    const current = ws[ref].s || {};
+    ws[ref].s = Object.assign({}, current, {
       fill:{ fgColor:{ rgb:'0D1629' } },
       font:{ bold:true, color:{ rgb:'B8CCE0' }, sz:10 },
-      alignment:{ vertical:'center', horizontal:'center', wrapText:true }
-    };
+      alignment:Object.assign({}, current.alignment || {}, { vertical:'center', horizontal, wrapText:true })
+    });
   }
   ws['!sheetView'] = [{ state:'frozen', ySplit:1 }];
 }
 
-function applySeverityColors(ws, severityCol) {
+function applySeverityColors(ws, severityCol, styles = SEVERITY_STYLES, horizontal = 'center') {
   if (!ws['!ref']) return;
   const range = XLSX.utils.decode_range(ws['!ref']);
   for (let r = 1; r <= range.e.r; r++) {
     const ref = colRef(severityCol) + (r + 1);
     const cell = ws[ref];
     if (!cell) continue;
-    const style = SEVERITY_STYLES[String(cell.v || '').toUpperCase().split('\\n')[0]];
+    const style = styles[String(cell.v || '').toUpperCase().split('\\n')[0]];
     if (!style) continue;
-    const current = cell.s || {};
-    cell.s = Object.assign({}, current, {
-      fill: { patternType: 'solid', fgColor: { rgb: style.fill } },
-      font: Object.assign({}, current.font || {}, { bold: true, color: { rgb: style.font } }),
-      alignment: Object.assign({}, current.alignment || {}, { horizontal: 'center', vertical: 'center' })
-    });
+    const merge = (ws['!merges'] || []).find(m => m.s.c === severityCol && m.s.r === r);
+    const endRow = merge ? merge.e.r : r;
+    for (let rr = r; rr <= endRow; rr++) {
+      const target = ensureCell(ws, rr, severityCol);
+      const current = target.s || {};
+      target.s = Object.assign({}, current, {
+        fill: { patternType: 'solid', fgColor: { rgb: style.fill } },
+        font: Object.assign({}, current.font || {}, { bold: true, color: { rgb: style.font } }),
+        alignment: Object.assign({}, current.alignment || {}, { horizontal, vertical: 'center', wrapText: true })
+      });
+    }
   }
 }
 
-// One row per package, multi-value columns joined with newlines so each
-// package shows up as a single Excel row regardless of how many licenses /
-// CVEs it has. This is the layout that renders identically on Windows and
-// macOS Excel. (The previous version used !merges to stack rows, which
-// macOS Excel for Mac renders with stray blank rows and squished columns.)
+const VULN_BORDER = {
+  top:    { style: 'thin', color: { rgb: '000000' } },
+  right:  { style: 'thin', color: { rgb: '000000' } },
+  bottom: { style: 'thin', color: { rgb: '000000' } },
+  left:   { style: 'thin', color: { rgb: '000000' } }
+};
+
+function ensureCell(ws, r, c) {
+  const ref = colRef(c) + (r + 1);
+  if (!ws[ref]) ws[ref] = { t: 's', v: '' };
+  return ws[ref];
+}
+
+function mergeColumn(merges, startRow, endRow, col) {
+  if (endRow <= startRow) return;
+  merges.push({ s: { r: startRow, c: col }, e: { r: endRow, c: col } });
+}
+
+function applyVulnSheetStyle(ws, rowCount, colCount) {
+  for (let r = 0; r < rowCount; r++) {
+    for (let c = 0; c < colCount; c++) {
+      const cell = ensureCell(ws, r, c);
+      const current = cell.s || {};
+      cell.s = Object.assign({}, current, {
+        border: VULN_BORDER,
+        font: Object.assign({ sz: 11 }, current.font || {}),
+        alignment: Object.assign({}, current.alignment || {}, {
+          horizontal: 'left',
+          vertical: 'center',
+          wrapText: true
+        })
+      });
+    }
+  }
+  applyHeader(ws, colCount, 'left');
+}
+
+function joinLines(values) {
+  const list = (values || []).map(v => String(v || '').trim()).filter(Boolean);
+  return (list.length ? list : ['-']).join('\\n');
+}
+
 function actionForLicense(lc) {
   const sev = String(lc.severity || '').toUpperCase();
   const cat = String(lc.category || '').toLowerCase();
@@ -994,28 +1180,64 @@ function actionForLicense(lc) {
 }
 
 function buildVulnSheet() {
-  const rows = [['Package','CVE ID','Severity','Installed Version','Fix To','Affected Services','Title']];
+  const rows = [['Package','CVE ID','Severity','Installed Version','Fix To','Affected Services']];
+  const merges = [];
+  const rowHeights = [{ hpt: 20 }];
+
   VULN_DATA.forEach(g => {
-    const cves = [...g.vulns].sort((a,b) => sevRank(a.severity)-sevRank(b.severity));
+    const cves = [...(g.vulns || [])].sort((a,b) => {
+      return sevRank(a.severity)-sevRank(b.severity) || String(a.cve || '').localeCompare(String(b.cve || ''));
+    });
     if (cves.length === 0) {
-      rows.push([g.pkg, '-', '-', '-', '-', g.folders.join('\\n'), '-']);
+      const rowIndex = rows.length;
+      rows.push([g.pkg, '-', '-', '-', '-', joinLines(g.folders)]);
+      rowHeights[rowIndex] = { hpt: 24 };
       return;
     }
-    rows.push([
-      g.pkg,
-      cves.map(cv => cv.cve || '-').join('\\n'),
-      cves.map(cv => cv.severity || '-').join('\\n'),
-      cves.map(cv => cv.version || '-').join('\\n'),
-      cves.map(cv => cv.fixed || '-').join('\\n'),
-      g.folders.join('\\n'),
-      cves.map(cv => cv.title || '-').join('\\n'),
-    ]);
+
+    const start = rows.length;
+    const versions = g.versions && g.versions.length ? g.versions : ['-'];
+    const fixes = g.fixed_versions && g.fixed_versions.length ? g.fixed_versions : ['-'];
+    const services = g.folders && g.folders.length ? g.folders : ['-'];
+
+    cves.forEach((cv, idx) => {
+      rows.push([
+        idx === 0 ? g.pkg : '',
+        cv.cve || '-',
+        cv.severity || 'UNKNOWN',
+        idx === 0 ? joinLines(versions) : '',
+        idx === 0 ? joinLines(fixes) : '',
+        idx === 0 ? joinLines(services) : '',
+      ]);
+    });
+
+    const end = rows.length - 1;
+    [0, 3, 4, 5].forEach(col => mergeColumn(merges, start, end, col));
+
+    let runStart = start;
+    let runSeverity = rows[start][2];
+    for (let row = start + 1; row <= end + 1; row++) {
+      const severity = row <= end ? rows[row][2] : null;
+      if (severity === runSeverity) continue;
+      mergeColumn(merges, runStart, row - 1, 2);
+      for (let blankRow = runStart + 1; blankRow <= row - 1; blankRow++) {
+        rows[blankRow][2] = '';
+      }
+      runStart = row;
+      runSeverity = severity;
+    }
+
+    const maxLines = Math.max(cves.length, versions.length, fixes.length, services.length);
+    const perRowHeight = Math.max(16, Math.min(409.5, Math.ceil((maxLines * 16) / cves.length)));
+    for (let row = start; row <= end; row++) rowHeights[row] = { hpt: perRowHeight };
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [38,24,14,18,24,35,60].map(w=>({wch:w}));
-  applyHeader(ws, 7);
-  applySeverityColors(ws, 2);
+  ws['!cols'] = [38,24,14,18,24,35].map(w=>({wch:w}));
+  ws['!rows'] = rowHeights;
+  ws['!merges'] = merges;
+  applyVulnSheetStyle(ws, rows.length, 6);
+  applySeverityColors(ws, 2, VULN_SEVERITY_STYLES, 'left');
   return ws;
 }
 
