@@ -1362,27 +1362,76 @@ function buildVulnSheet() {
 
 function buildLicSheet() {
   const rows = [['Package','License','Severity','Category','Action','File Paths','Affected Services']];
+  const merges = [];
+  const rowHeights = [{ hpt: 20 }];
+
   LIC_DATA.forEach(g => {
-    const lics = [...g.licenses].sort((a,b) => sevRank(a.severity)-sevRank(b.severity));
+    const lics = [...(g.licenses || g.lics || [])].sort((a,b) =>
+      sevRank(a.severity) - sevRank(b.severity)
+      || String(a.license || '').localeCompare(String(b.license || ''))
+    );
     if (lics.length === 0) {
-      rows.push([g.pkg, '-', '-', '-', '-', '-', g.folders.join('\\n')]);
+      const rowIndex = rows.length;
+      rows.push([g.pkg, '-', '-', '-', '-', '-', joinLines(g.folders)]);
+      rowHeights[rowIndex] = { hpt: 24 };
       return;
     }
-    rows.push([
-      g.pkg,
-      lics.map(lc => lc.license || '-').join('\\n'),
-      lics.map(lc => lc.severity || 'UNKNOWN').join('\\n'),
-      lics.map(lc => lc.category || '-').join('\\n'),
-      lics.map(actionForLicense).join('\\n'),
-      lics.map(lc => joinLines(lc.filepaths || [lc.filepath || '-'])).join('\\n---\\n'),
-      g.folders.join('\\n'),
-    ]);
+
+    const start = rows.length;
+    const services = g.folders && g.folders.length ? g.folders : ['-'];
+
+    lics.forEach((lc, idx) => {
+      rows.push([
+        idx === 0 ? g.pkg : '',
+        lc.license || '-',
+        lc.severity || 'UNKNOWN',
+        lc.category || '-',
+        actionForLicense(lc),
+        joinLines(lc.filepaths || [lc.filepath || '-']),
+        idx === 0 ? joinLines(services) : '',
+      ]);
+    });
+
+    const end = rows.length - 1;
+    // Merge Package (col 0) and Affected Services (col 6) across the group,
+    // mirroring buildVulnSheet which merges cols [0, 3, 4, 5].
+    [0, 6].forEach(col => mergeColumn(merges, start, end, col));
+
+    // Merge consecutive rows that share the same severity (col 2),
+    // then blank the repeated severity cell so the merge is clean.
+    let runStart = start;
+    let runSeverity = rows[start][2];
+    for (let row = start + 1; row <= end + 1; row++) {
+      const severity = row <= end ? rows[row][2] : null;
+      if (severity === runSeverity) continue;
+      if (row - 1 > runStart) mergeColumn(merges, runStart, row - 1, 2);
+      for (let blankRow = runStart + 1; blankRow <= row - 1; blankRow++) {
+        rows[blankRow][2] = '';
+      }
+      runStart = row;
+      runSeverity = severity;
+    }
+
+    // Row height scaled by the tallest column (license, category, file paths, services).
+    const maxLines = Math.max(
+      1,
+      ...lics.map(lc => Math.max(
+        String(lc.license || '').split('\n').length,
+        String(lc.category || '').split('\n').length,
+        (lc.filepaths || [lc.filepath || '-']).filter(Boolean).length,
+      )),
+      services.length
+    );
+    const perRowHeight = Math.max(16, Math.min(409.5, Math.ceil((maxLines * 16) / lics.length)));
+    for (let row = start; row <= end; row++) rowHeights[row] = { hpt: perRowHeight };
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [38,34,14,20,16,50,35].map(w=>({wch:w}));
-  applyHeader(ws, 7);
-  applySeverityColors(ws, 2);
+  ws['!cols'] = [38, 34, 14, 20, 16, 50, 35].map(w => ({ wch: w }));
+  ws['!rows'] = rowHeights;
+  ws['!merges'] = merges;
+  applyVulnSheetStyle(ws, rows.length, 7);
+  applySeverityColors(ws, 2, SEVERITY_STYLES, 'left');
   return ws;
 }
 
