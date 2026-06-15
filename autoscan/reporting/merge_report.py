@@ -1416,8 +1416,8 @@ function buildLicSheet() {
     const maxLines = Math.max(
       1,
       ...lics.map(lc => Math.max(
-        String(lc.license || '').split('\n').length,
-        String(lc.category || '').split('\n').length,
+        String(lc.license || '').split('\\n').length,
+        String(lc.category || '').split('\\n').length,
         (lc.filepaths || [lc.filepath || '-']).filter(Boolean).length,
       )),
       services.length
