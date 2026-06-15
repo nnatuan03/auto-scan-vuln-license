@@ -514,16 +514,16 @@ ORDER = SEVERITY_ORDER
 
 def sev_chip(sev):
     c = SEV_COLOR.get(sev, "#718096")
-    return '<span class="sev-chip" style="color:{0};border-color:{0}40;background:{0}12">{1}</span>'.format(c, sev)
+    return '<span class="sev-chip" style="color:{0};border-color:{0}40;background:{0}12">{1}</span>'.format(c, escape(str(sev)))
 
 
 def lic_chip(name):
     border, bg = get_license_badge_color(name)
-    return '<span class="lic-chip" style="color:{0};background:{1};border-color:{0}30">{2}</span>'.format(border, bg, name)
+    return '<span class="lic-chip" style="color:{0};background:{1};border-color:{0}30">{2}</span>'.format(border, bg, escape(str(name)))
 
 
 def action_chip(action, color):
-    return '<span class="action-chip" style="color:{0};border-color:{0}50;background:{0}10">{1}</span>'.format(color, action)
+    return '<span class="action-chip" style="color:{0};border-color:{0}50;background:{0}10">{1}</span>'.format(color, escape(str(action)))
 
 
 def line_stack(items):
@@ -560,12 +560,12 @@ def paths_html(folders, max_show=4):
     uid = abs(hash(str(folders))) % 999999
     html = '<div class="paths-wrap">'
     for f in visible:
-        html += '<div class="path-item">{0}</div>'.format(f)
+        html += '<div class="path-item">{0}</div>'.format(escape(str(f)))
     if hidden:
         html += '<div class="path-more" onclick="togglePaths({0},this)">+ {1} more</div>'.format(uid, len(hidden))
         html += '<div class="path-hidden" id="ph-{0}" style="display:none">'.format(uid)
         for f in hidden:
-            html += '<div class="path-item">{0}</div>'.format(f)
+            html += '<div class="path-item">{0}</div>'.format(escape(str(f)))
         html += '</div>'
     html += '</div>'
     return html
@@ -672,45 +672,76 @@ def generate_html(be_dir, output_html):
             x["pkg"].lower(),
         ))
         for group_index, r in enumerate(sorted_lics):
-            so = ORDER.get(r["severity"], 99)
             group_bg = "grp-even" if (group_index % 2 == 0) else "grp-odd"
             licenses = r["licenses"]
-            # Dedupe by (license, severity, category) tuple so the same combo
-            # coming from multiple folders doesn't repeat as chips.
-            seen_combo = set()
-            unique_licenses = []
-            for lic in licenses:
-                key = (lic.get("license", ""), lic.get("severity", "UNKNOWN"), lic.get("category", ""))
-                if key in seen_combo:
-                    continue
-                seen_combo.add(key)
-                unique_licenses.append(lic)
-            license_lines = [lic_chip(lic.get("license", "")) for lic in unique_licenses]
-            severity_lines = [sev_chip(lic.get("severity", "UNKNOWN")) for lic in unique_licenses]
-            category_lines = [lic.get("category", "") or "-" for lic in unique_licenses]
-            action_lines = []
-            for lic in unique_licenses:
-                action, color = get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))
-                action_lines.append(action_chip(action, color))
+            if not licenses:
+                licenses = [{
+                    "license": "-",
+                    "severity": r.get("severity") or "UNKNOWN",
+                    "category": "-",
+                    "folders": r.get("folders") or ["-"],
+                    "filepaths": [],
+                }]
+            rowspan = len(licenses)
             severity_attr = ",".join(unique_values(lic.get("severity", "") for lic in licenses))
             category_attr = ",".join(unique_values(lic.get("category", "") for lic in licenses))
             action_attr = ",".join(unique_values(get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))[0] for lic in licenses))
-            rows += '<tr class="data-row lic-grp {9} grp-end" data-severity="{0}" data-severities="{10}" data-categories="{11}" data-actions="{12}" data-pkg="{8}"><td class="pkg-name">{1}</td><td>{2}</td><td data-value="{3}">{4}</td><td style="font-size:12px;color:#4a5568">{5}</td><td>{6}</td><td>{7}</td></tr>'.format(
-                r["severity"],
-                escape(r["pkg"]),
-                html_line_stack(license_lines),
-                so,
-                html_line_stack(severity_lines),
-                line_stack(category_lines),
-                html_line_stack(action_lines),
-                paths_html(r["folders"]),
-                escape(r["pkg"]),
+            license_sort = " ".join(lic.get("license", "") for lic in licenses)
+            category_sort = " ".join(lic.get("category", "") for lic in licenses)
+            action_sort = " ".join(get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))[0] for lic in licenses)
+            search_text = " ".join([
+                r["pkg"],
+                license_sort,
+                severity_attr,
+                category_sort,
+                action_sort,
+                " ".join(r["folders"]),
+                " ".join(path for lic in licenses for path in lic.get("filepaths", [])),
+            ])
+            rows += '<tbody class="lic-group {0}" data-severity="{1}" data-severities="{2}" data-categories="{3}" data-actions="{4}" data-pkg="{5}" data-search="{6}" data-sort-package="{7}" data-sort-license="{8}" data-sort-severity="{9}" data-sort-category="{10}" data-sort-action="{11}" data-sort-services="{12}">'.format(
                 group_bg,
+                escape(r["severity"]),
                 escape(severity_attr),
                 escape(category_attr),
                 escape(action_attr),
+                escape(r["pkg"]),
+                escape(search_text.lower()),
+                escape(r["pkg"].lower()),
+                escape(license_sort.lower()),
+                ORDER.get(r["severity"], 99),
+                escape(category_sort.lower()),
+                escape(action_sort.lower()),
+                escape(" ".join(r["folders"]).lower()),
             )
-        return rows or '<tr><td colspan="6" class="no-data">No license issues found.</td></tr>'
+            for lic_index, lic in enumerate(licenses):
+                severity = lic.get("severity") or "UNKNOWN"
+                category = lic.get("category") or "-"
+                action, color = get_license_action(severity, category, lic.get("license", ""))
+                row_class = "grp-end" if lic_index == rowspan - 1 else "grp-mid"
+                rows += '<tr class="data-row lic-grp license-row {0} {1}" data-severity="{2}" data-severities="{3}" data-categories="{4}" data-actions="{5}" data-pkg="{6}">'.format(
+                    group_bg,
+                    row_class,
+                    escape(severity),
+                    escape(severity_attr),
+                    escape(category_attr),
+                    escape(action_attr),
+                    escape(r["pkg"]),
+                )
+                if lic_index == 0:
+                    rows += '<td class="pkg-name vuln-merged-cell" rowspan="{0}">{1}</td>'.format(rowspan, escape(r["pkg"]))
+                rows += '<td>{0}</td>'.format(lic_chip(lic.get("license", "") or "-"))
+                rows += '<td class="severity-cell severity-{0}" data-value="{1}">{2}</td>'.format(
+                    escape(severity.lower()),
+                    ORDER.get(severity, 99),
+                    escape(severity),
+                )
+                rows += '<td style="font-size:12px;color:#4a5568">{0}</td>'.format(escape(category))
+                rows += '<td>{0}</td>'.format(action_chip(action, color))
+                if lic_index == 0:
+                    rows += '<td class="vuln-merged-cell" rowspan="{0}">{1}</td>'.format(rowspan, paths_html(r["folders"]))
+                rows += '</tr>'
+            rows += '</tbody>'
+        return rows or '<tbody class="lic-empty"><tr><td colspan="6" class="no-data">No license issues found.</td></tr></tbody>'
 
     def metric_card(label, value, sub, color):
         return '<div class="metric-card"><div class="metric-value" style="color:{0}">{1}</div><div class="metric-label">{2}</div><div class="metric-sub">{3}</div></div>'.format(color, value, label, sub)
@@ -839,7 +870,7 @@ def generate_html(be_dir, output_html):
   .lic-grp.grp-odd  td{background:#f4f8fc}
   /* Hover highlights the whole hovered row regardless of group color */
   .lic-grp:hover td{background:#eaf2fb}
-  tbody.vuln-group.hidden{display:none}
+  tbody.vuln-group.hidden,tbody.lic-group.hidden{display:none}
   .vuln-merged-cell{vertical-align:middle}
   .severity-cell{font-weight:700;color:#fff;text-align:left;vertical-align:middle;letter-spacing:.03em}
   .severity-critical{background:#8b0000!important}
@@ -998,14 +1029,14 @@ def generate_html(be_dir, output_html):
     <div class="table-wrap"><div class="table-scroll">
     <table id="licTable">
       <thead><tr>
-        <th onclick="sortTable('licTable',0)">Package <span class="si">&#8645;</span></th>
-        <th onclick="sortTable('licTable',1)">License <span class="si">&#8645;</span></th>
-        <th onclick="sortTable('licTable',2)">Severity <span class="si">&#8645;</span></th>
-        <th onclick="sortTable('licTable',3)">Category <span class="si">&#8645;</span></th>
-        <th onclick="sortTable('licTable',4)">Action <span class="si">&#8645;</span></th>
-        <th>Affected Services</th>
+        <th onclick="sortLicTable(0)">Package <span class="si">&#8645;</span></th>
+        <th onclick="sortLicTable(1)">License <span class="si">&#8645;</span></th>
+        <th onclick="sortLicTable(2)">Severity <span class="si">&#8645;</span></th>
+        <th onclick="sortLicTable(3)">Category <span class="si">&#8645;</span></th>
+        <th onclick="sortLicTable(4)">Action <span class="si">&#8645;</span></th>
+        <th onclick="sortLicTable(5)">Affected Services <span class="si">&#8645;</span></th>
       </tr></thead>
-      <tbody id="licBody">""" + lic_table_rows() + """</tbody>
+      """ + lic_table_rows() + """
     </table>
     </div></div>
   </div>
@@ -1082,6 +1113,26 @@ function sortVulnTable(col) {
   });
 }
 
+function sortLicTable(col) {
+  const table = document.getElementById('licTable');
+  const groups = Array.from(table.querySelectorAll('tbody.lic-group'));
+  const key = 'lic' + col;
+  const asc = sortState[key] = !sortState[key];
+  const sortKeys = ['package', 'license', 'severity', 'category', 'action', 'services'];
+  const sortKey = sortKeys[col] || 'package';
+  groups.sort((a, b) => {
+    const aVal = a.dataset['sort' + sortKey.charAt(0).toUpperCase() + sortKey.slice(1)] || '';
+    const bVal = b.dataset['sort' + sortKey.charAt(0).toUpperCase() + sortKey.slice(1)] || '';
+    const aNum = parseFloat(aVal), bNum = parseFloat(bVal);
+    if (!isNaN(aNum) && !isNaN(bNum)) return asc ? aNum - bNum : bNum - aNum;
+    return asc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+  });
+  groups.forEach(group => table.appendChild(group));
+  document.querySelectorAll('#licTable th .si').forEach((el, i) => {
+    el.textContent = i === col ? (asc ? '↑' : '↓') : '⇅';
+  });
+}
+
 function filterVuln() {
   const q = document.getElementById('vulnSearch').value.toLowerCase();
   const sev = document.getElementById('vulnSevFilter').value;
@@ -1102,14 +1153,13 @@ function filterLic() {
   const cat = document.getElementById('licCatFilter').value;
   const act = document.getElementById('licActFilter').value;
   let c = 0;
-  document.querySelectorAll('#licBody tr').forEach(tr => {
-    // Include data-pkg so rows with blank package cell (grouped) still match search
-    const text = (tr.innerText + ' ' + (tr.dataset.pkg || '')).toLowerCase();
-    const severities = tr.dataset.severities || tr.dataset.severity || '';
-    const categories = (tr.dataset.categories || '').toLowerCase().split(',');
-    const actions = (tr.dataset.actions || '').toLowerCase().split(',');
+  document.querySelectorAll('#licTable tbody.lic-group').forEach(group => {
+    const text = group.dataset.search || group.innerText.toLowerCase();
+    const severities = group.dataset.severities || group.dataset.severity || '';
+    const categories = (group.dataset.categories || '').toLowerCase().split(',');
+    const actions = (group.dataset.actions || '').toLowerCase().split(',');
     const show = (!q||text.includes(q)) && (!sev||severities.split(',').includes(sev)) && (!cat||categories.includes(cat.toLowerCase())) && (!act||actions.includes(act.toLowerCase()));
-    tr.classList.toggle('hidden', !show);
+    group.classList.toggle('hidden', !show);
     if (show) c++;
   });
   document.getElementById('licCount').textContent = c + ' packages';

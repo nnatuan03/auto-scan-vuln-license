@@ -347,7 +347,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
 
     def sev_chip(severity):
         _, color = sev_style.get(severity, ("", "#718096"))
-        return f'<span class="sev-chip" style="color:{color};border-color:{color}40;background:{color}12">{severity}</span>'
+        return f'<span class="sev-chip" style="color:{color};border-color:{color}40;background:{color}12">{escape(str(severity))}</span>'
 
     def sev_dot(severity):
         _, color = sev_style.get(severity, ("", "#718096"))
@@ -355,10 +355,10 @@ def generate_html(report_path="report.json", output_path="report.html"):
 
     def lic_chip(name):
         border_color, bg = get_license_badge_color(name)
-        return f'<span class="lic-chip" style="color:{border_color};background:{bg};border-color:{border_color}30">{name}</span>'
+        return f'<span class="lic-chip" style="color:{border_color};background:{bg};border-color:{border_color}30">{escape(str(name))}</span>'
 
     def action_chip(action, color):
-        return f'<span class="action-chip" style="color:{color};border-color:{color}50;background:{color}10">{action}</span>'
+        return f'<span class="action-chip" style="color:{color};border-color:{color}50;background:{color}10">{escape(str(action))}</span>'
 
     def line_stack(items):
         values = [str(item) for item in items if str(item or "").strip()]
