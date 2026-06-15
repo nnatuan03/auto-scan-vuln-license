@@ -2,3 +2,6 @@ __pycache__/
 *.py[cod]
 scan-results/
 .DS_Store
+analysis/coroot-ee/
+outputs/coroot-ee-binary-analysis/
+tests/

@@ -1,4 +1,0 @@
-
-/Users/itsmac/Documents/Binary/coroot-ee:	file format elf64-littleaarch64
-architecture: aarch64
-start address: 0x0000000000402c00
