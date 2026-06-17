@@ -256,6 +256,8 @@ def _run_dotnet(project: Project, output_sbom: Path, log_file: Path) -> tuple[Pa
         output_sbom.name,
         "--output-format",
         "Json",
+        "--spec-version",
+        "1.6",
     ]
     if target.suffix.lower() in {".csproj", ".fsproj", ".vbproj", ".xsproj"}:
         command.append("--recursive")
