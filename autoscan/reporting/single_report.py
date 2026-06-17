@@ -1719,6 +1719,16 @@ function applySeverityColors(ws, severityCol) {{
   }}
 }}
 
+function joinLines(values) {{
+  const list = (values || []).map(v => String(v || '').trim()).filter(Boolean);
+  return (list.length ? list : ['-']).join('\\n');
+}}
+
+function mergeColumn(merges, startRow, endRow, col) {{
+  if(endRow <= startRow) return;
+  merges.push({{ s: {{ r: startRow, c: col }}, e: {{ r: endRow, c: col }} }});
+}}
+
 function buildVulnSheet() {{
   const rows=[['Package','Installed Version','CVE ID','Severity','Fixed Version','Title','Target']];
 
@@ -1744,23 +1754,70 @@ function buildVulnSheet() {{
 
 function buildLicSheet() {{
   const rows=[['Package','License','Severity','Category','Action','File Path','Target']];
+  const merges = [];
+  const rowHeights = [{{ hpt: 20 }}];
 
   LIC_GROUPS.forEach(g=>{{
-    const lics=[...g.lics].sort((a,b)=>sevRank(a.severity)-sevRank(b.severity));
-    rows.push([
-      g.pkg,
-      lics.map(lc=>lc.license || '-').join('\\n'),
-      lics.map(lc=>lc.severity || 'UNKNOWN').join('\\n'),
-      lics.map(lc=>lc.category || '-').join('\\n'),
-      lics.map(lc=>lc.action || '-').join('\\n'),
-      lics.map(lc=>lc.filepath || '-').join('\\n'),
-      g.target
-    ]);
+    const lics=[...(g.lics || [])].sort((a,b)=>
+      sevRank(a.severity)-sevRank(b.severity)
+      || String(a.license || '').localeCompare(String(b.license || ''))
+    );
+    const targets = g.targets && g.targets.length ? g.targets : [g.target || '-'];
+
+    if(lics.length === 0) {{
+      const rowIndex = rows.length;
+      rows.push([g.pkg, '-', '-', '-', '-', '-', joinLines(targets)]);
+      rowHeights[rowIndex] = {{ hpt: 24 }};
+      return;
+    }}
+
+    const start = rows.length;
+    lics.forEach((lc,idx)=>{{
+      const paths = lc.filepaths && lc.filepaths.length ? lc.filepaths : [lc.filepath || '-'];
+      rows.push([
+        idx === 0 ? g.pkg : '',
+        lc.license || '-',
+        lc.severity || 'UNKNOWN',
+        lc.category || '-',
+        lc.action || '-',
+        joinLines(paths),
+        idx === 0 ? joinLines(targets) : ''
+      ]);
+    }});
+
+    const end = rows.length - 1;
+    [0,6].forEach(col=>mergeColumn(merges,start,end,col));
+
+    let runStart = start;
+    let runSeverity = rows[start][2];
+    for(let row = start + 1; row <= end + 1; row++) {{
+      const severity = row <= end ? rows[row][2] : null;
+      if(severity === runSeverity) continue;
+      if(row - 1 > runStart) mergeColumn(merges, runStart, row - 1, 2);
+      for(let blankRow = runStart + 1; blankRow <= row - 1; blankRow++) {{
+        rows[blankRow][2] = '';
+      }}
+      runStart = row;
+      runSeverity = severity;
+    }}
+
+    const maxLines = Math.max(
+      1,
+      ...lics.map(lc => Math.max(
+        String(lc.license || '').split('\\n').length,
+        String(lc.category || '').split('\\n').length,
+        (lc.filepaths && lc.filepaths.length ? lc.filepaths : [lc.filepath || '-']).filter(Boolean).length
+      )),
+      targets.length
+    );
+    const perRowHeight = Math.max(16, Math.min(409.5, Math.ceil((maxLines * 16) / lics.length)));
+    for(let row = start; row <= end; row++) rowHeights[row] = {{ hpt: perRowHeight }};
   }});
 
   const ws=XLSX.utils.aoa_to_sheet(rows);
   ws['!cols']=[40,34,14,20,16,50,35].map(w=>{{return{{wch:w}}}});
-  applyMergesAndStyle(ws, [], rows[0], 7);
+  ws['!rows']=rowHeights;
+  applyMergesAndStyle(ws, merges, rows[0], 7);
   applySeverityColors(ws, 2);
   return ws;
 }}

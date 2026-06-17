@@ -54,8 +54,8 @@ DOCUMENT_COVERAGE: list[dict[str, str]] = [
     },
     {
         "case": ".NET license scan",
-        "document": "Install CycloneDX dotnet tool, run dotnet-CycloneDX <project> -j, normalize bom.json, scan license JSON/TXT.",
-        "implementation": "Installs CycloneDX when missing and dotnet exists; runs dotnet-CycloneDX against the first .sln/.csproj found, then normalizes and scans license.",
+        "document": "Install CycloneDX dotnet tool, run dotnet-CycloneDX <project> --output <dir> --filename SBOM.cdx.json --output-format Json, normalize bom.json, scan license JSON/TXT.",
+        "implementation": "Installs CycloneDX when missing and dotnet exists; runs dotnet-CycloneDX against the first .sln/.csproj found, adds --recursive for project files, then normalizes and scans license.",
         "status": "COVERED",
         "difference": "Output is copied into scan-results for the current run.",
     },

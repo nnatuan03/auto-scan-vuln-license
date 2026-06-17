@@ -247,7 +247,18 @@ def _run_dotnet(project: Project, output_sbom: Path, log_file: Path) -> tuple[Pa
     targets = sorted(project.path.glob("*.sln")) + sorted(project.path.glob("*.csproj"))
     target = targets[0] if targets else project.path
     started_at = time.time()
-    command = [cyclonedx, str(target), "-j"]
+    command = [
+        cyclonedx,
+        str(target),
+        "--output",
+        str(output_sbom.parent),
+        "--filename",
+        output_sbom.name,
+        "--output-format",
+        "Json",
+    ]
+    if target.suffix.lower() in {".csproj", ".fsproj", ".vbproj", ".xsproj"}:
+        command.append("--recursive")
     record, _, _ = run_command(command, cwd=project.path, log_file=log_file)
     records.append(record)
     after = _latest_matching_file(
@@ -256,6 +267,8 @@ def _run_dotnet(project: Project, output_sbom: Path, log_file: Path) -> tuple[Pa
         modified_after=started_at,
         exclude_roots=(output_sbom.parent,),
     )
+    if record.returncode == 0 and output_sbom.is_file() and output_sbom.stat().st_mtime >= started_at:
+        return output_sbom, records
     if record.returncode == 0 and after:
         return _copy_or_raise(after, output_sbom), records
     return None, records
