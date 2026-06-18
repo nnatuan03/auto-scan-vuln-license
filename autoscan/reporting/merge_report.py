@@ -609,8 +609,16 @@ def generate_html(be_dir, output_html):
                     "titles": [],
                 }]
             rowspan = len(vulns)
-            version_lines = r.get("versions") or ["-"]
-            fixed_lines = r.get("fixed_versions") or ["-"]
+            version_lines = unique_values(
+                version
+                for vuln in vulns
+                for version in (vuln.get("versions") or ["-"])
+            ) or ["-"]
+            fixed_lines = unique_values(
+                fixed
+                for vuln in vulns
+                for fixed in (vuln.get("fixed_versions") or ["-"])
+            ) or ["-"]
             severity_attr = ",".join(unique_values(v.get("severity", "") for v in vulns))
             cve_sort = " ".join(v.get("cve", "") for v in vulns)
             search_text = " ".join([
@@ -656,9 +664,9 @@ def generate_html(be_dir, output_html):
                     ORDER.get(severity, 99),
                     escape(severity),
                 )
+                rows += '<td>{0}</td>'.format(line_stack(v.get("versions") or ["-"]))
+                rows += '<td>{0}</td>'.format(line_stack(v.get("fixed_versions") or ["-"]))
                 if vuln_index == 0:
-                    rows += '<td class="vuln-merged-cell" rowspan="{0}">{1}</td>'.format(rowspan, line_stack(version_lines))
-                    rows += '<td class="vuln-merged-cell" rowspan="{0}">{1}</td>'.format(rowspan, line_stack(fixed_lines))
                     rows += '<td class="vuln-merged-cell" rowspan="{0}">{1}</td>'.format(rowspan, line_stack(r["folders"]))
                 rows += '</tr>'
             rows += '</tbody>'
@@ -872,6 +880,7 @@ def generate_html(be_dir, output_html):
   .lic-grp:hover td{background:#eaf2fb}
   tbody.vuln-group.hidden,tbody.lic-group.hidden{display:none}
   .vuln-merged-cell{vertical-align:middle}
+  .vuln-row.grp-mid td:not(.vuln-merged-cell){border-bottom:1px solid var(--border)}
   .severity-cell{font-weight:700;color:#fff;text-align:left;vertical-align:middle;letter-spacing:.03em}
   .severity-critical{background:#8b0000!important}
   .severity-high{background:#ff0000!important}
@@ -1315,40 +1324,27 @@ function buildVulnSheet() {
     }
 
     const start = rows.length;
-    const versions = g.versions && g.versions.length ? g.versions : ['-'];
-    const fixes = g.fixed_versions && g.fixed_versions.length ? g.fixed_versions : ['-'];
     const services = g.folders && g.folders.length ? g.folders : ['-'];
+    const serviceLinesPerRow = Math.max(1, Math.ceil(services.length / cves.length));
 
     cves.forEach((cv, idx) => {
+      const versions = cv.versions && cv.versions.length ? cv.versions : [cv.version || '-'];
+      const fixes = cv.fixed_versions && cv.fixed_versions.length ? cv.fixed_versions : [cv.fixed || '-'];
+      const rowIndex = rows.length;
       rows.push([
         idx === 0 ? g.pkg : '',
         cv.cve || '-',
         cv.severity || 'UNKNOWN',
-        idx === 0 ? joinLines(versions) : '',
-        idx === 0 ? joinLines(fixes) : '',
+        joinLines(versions),
+        joinLines(fixes),
         idx === 0 ? joinLines(services) : '',
       ]);
+      const rowLines = Math.max(1, versions.length, fixes.length, idx === 0 ? serviceLinesPerRow : 1);
+      rowHeights[rowIndex] = { hpt: Math.max(18, Math.min(409.5, rowLines * 16)) };
     });
 
     const end = rows.length - 1;
-    [0, 3, 4, 5].forEach(col => mergeColumn(merges, start, end, col));
-
-    let runStart = start;
-    let runSeverity = rows[start][2];
-    for (let row = start + 1; row <= end + 1; row++) {
-      const severity = row <= end ? rows[row][2] : null;
-      if (severity === runSeverity) continue;
-      mergeColumn(merges, runStart, row - 1, 2);
-      for (let blankRow = runStart + 1; blankRow <= row - 1; blankRow++) {
-        rows[blankRow][2] = '';
-      }
-      runStart = row;
-      runSeverity = severity;
-    }
-
-    const maxLines = Math.max(cves.length, versions.length, fixes.length, services.length);
-    const perRowHeight = Math.max(16, Math.min(409.5, Math.ceil((maxLines * 16) / cves.length)));
-    for (let row = start; row <= end; row++) rowHeights[row] = { hpt: perRowHeight };
+    [0, 5].forEach(col => mergeColumn(merges, start, end, col));
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -1393,8 +1389,7 @@ function buildLicSheet() {
     });
 
     const end = rows.length - 1;
-    // Merge Package (col 0) and Affected Services (col 6) across the group,
-    // mirroring buildVulnSheet which merges cols [0, 3, 4, 5].
+    // Merge Package (col 0) and Affected Services (col 6) across the group.
     [0, 6].forEach(col => mergeColumn(merges, start, end, col));
 
     // Merge consecutive rows that share the same severity (col 2),
