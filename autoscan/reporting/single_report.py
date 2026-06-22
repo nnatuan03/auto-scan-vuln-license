@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import datetime
 
 from autoscan.package_names import canonical_pkg_key, resolve_package_name
+from autoscan.license_relation import classify_license_relation
 
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
 
@@ -60,6 +61,15 @@ def get_license_badge_color(license_name):
         return ("#6b46c1", "#f5f0ff")
     else:
         return ("#4a5568", "#f7fafc")
+
+def relation_chip(relation):
+    rel = str(relation or "REVIEW").upper()
+    cls = {
+        "OR": "sev-low",
+        "AND": "sev-medium",
+        "REVIEW": "sev-high",
+    }.get(rel, "sev-unknown")
+    return f'<span class="sev-chip {cls}">{escape(rel)}</span>'
 
 
 def dependency_health_html(health):
@@ -143,6 +153,9 @@ def _aggregate_cves_by_id(cves):
             item["title"] = " | ".join(item["titles"])
     return list(by_cve.values())
 
+def _without_license_paths(row):
+    return {key: value for key, value in row.items() if key not in ("filepath", "filepaths")}
+
 
 def _group_license_rows(license_rows):
     groups = defaultdict(lambda: {
@@ -205,6 +218,7 @@ def _group_license_rows(license_rows):
             ",".join(categories),
             ",".join(license_names),
         )
+        relation = classify_license_relation(license_names)
         result.append({
             "pkg": group["_display_name"] or pkg_key,
             "target": "\n".join(group["targets"]) if group["targets"] else "-",
@@ -216,6 +230,9 @@ def _group_license_rows(license_rows):
             "categories": categories,
             "action": action,
             "action_color": action_color,
+            "license_relation": relation["relation"],
+            "compliance_requirement": relation["requirement"],
+            "license_relation_reason": relation["reason"],
             "lic_count": len(licenses),
             "lics": licenses,
             "licenses": licenses,
@@ -457,11 +474,14 @@ def generate_html(report_path="report.json", output_path="report.html"):
         severity_lines = [sev_chip(lc["severity"]) for lc in lics]
         severity_attr = ",".join(unique_values(lc["severity"] for lc in lics))
         target_html = line_stack(g.get("targets") or [g.get("target", "-")])
+        relation_html = relation_chip(g.get("license_relation"))
+        requirement = escape(g.get("compliance_requirement") or "Manual review required.")
         lic_summary_rows += f"""
         <tr class="data-row lic-row" data-idx="{i}" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}" data-sev-order="{sev_order}">
             <td><span class="pkg-name">{escape(g['pkg'])}</span></td>
             <td style="max-width:280px">{html_line_stack(lic_lines)}</td>
             <td data-value="{sev_order}">{html_line_stack(severity_lines)}</td>
+            <td>{relation_html}<div class="dim-text" style="font-size:11px;margin-top:4px">{requirement}</div></td>
             <td><span class="count-pill">{g['lic_count']}</span></td>
             <td class="dim-text">{target_html}</td>
         </tr>"""
@@ -474,17 +494,15 @@ def generate_html(report_path="report.json", output_path="report.html"):
             sev_order = SEVERITY_ORDER.get(g["highest_severity"], 99)
             lic_lines = [lic_chip(lc["license"]) for lc in lics]
             severity_lines = [sev_chip(lc["severity"]) for lc in lics]
-            filepath_lines = [
-                "; ".join(lc.get("filepaths") or [lc.get("filepath", "-") or "-"])
-                for lc in lics
-            ]
             severity_attr = ",".join(unique_values(lc["severity"] for lc in lics))
             target_html = line_stack(g.get("targets") or [g.get("target", "-")])
+            relation_html = relation_chip(g.get("license_relation"))
+            requirement = escape(g.get("compliance_requirement") or "Manual review required.")
             rows += f"""<tr class="data-row" data-count="{len(lics)}" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}">
                 <td class="pkg-name">{escape(g['pkg'])}</td>
                 <td>{html_line_stack(lic_lines)}</td>
                 <td data-value="{sev_order}">{html_line_stack(severity_lines)}</td>
-                <td class="dim-text" style="font-size:11px">{line_stack(filepath_lines)}</td>
+                <td>{relation_html}<div class="dim-text" style="font-size:11px;margin-top:4px">{requirement}</div></td>
                 <td class="dim-text">{target_html}</td>
             </tr>"""
         return rows
@@ -532,10 +550,13 @@ def generate_html(report_path="report.json", output_path="report.html"):
         "license_names": g["license_names"],
         "categories": g["categories"],
         "action": g["action"],
+        "license_relation": g.get("license_relation", "REVIEW"),
+        "compliance_requirement": g.get("compliance_requirement", "Manual review required."),
+        "license_relation_reason": g.get("license_relation_reason", ""),
         "lic_count": g["lic_count"],
         "lics": [
             {
-                **lic,
+                **_without_license_paths(lic),
                 "action": get_license_action(lic["severity"], lic.get("category", ""), lic.get("license", ""))[0],
             }
             for lic in g["lics"]
@@ -543,7 +564,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
     } for g in lic_groups], ensure_ascii=False).replace('</script>', '<\\/script>').replace('<!--', '<\\!--')
 
     vuln_json = json.dumps(vuln_rows, ensure_ascii=False).replace('</script>', '<\\/script>').replace('<!--', '<\\!--')
-    lic_json  = json.dumps(license_rows, ensure_ascii=False).replace('</script>', '<\\/script>').replace('<!--', '<\\!--')
+    lic_json  = json.dumps([_without_license_paths(row) for row in license_rows], ensure_ascii=False).replace('</script>', '<\\/script>').replace('<!--', '<\\!--')
     dependency_health_banner = dependency_health_html(dependency_health)
 
     html = f"""<!DOCTYPE html>
@@ -1386,11 +1407,12 @@ def generate_html(report_path="report.json", output_path="report.html"):
           <th onclick="sortTable('lsTable',0)">Package <span class="si">⇅</span></th>
           <th>Licenses</th>
           <th onclick="sortTable('lsTable',2)">Severity <span class="si">⇅</span></th>
-          <th onclick="sortTable('lsTable',3)">Count <span class="si">⇅</span></th>
+          <th onclick="sortTable('lsTable',3)">Relation <span class="si">⇅</span></th>
+          <th onclick="sortTable('lsTable',4)">Count <span class="si">⇅</span></th>
           <th>Target</th>
         </tr></thead>
         <tbody id="lsBody">
-          {lic_summary_rows or '<tr><td colspan="5" class="no-data">No license issues found.</td></tr>'}
+          {lic_summary_rows or '<tr><td colspan="6" class="no-data">No license issues found.</td></tr>'}
         </tbody>
       </table>
       </div>
@@ -1422,8 +1444,8 @@ def generate_html(report_path="report.json", output_path="report.html"):
           <th onclick="sortTable('ldTable',0)">Package <span class="si">⇅</span></th>
           <th onclick="sortTable('ldTable',1)">License <span class="si">⇅</span></th>
           <th onclick="sortTable('ldTable',2)">Severity <span class="si">⇅</span></th>
-          <th onclick="sortTable('ldTable',3)">File Path <span class="si">⇅</span></th>
-          <th>Target</th>
+          <th onclick="sortTable('ldTable',3)">Relation <span class="si">⇅</span></th>
+          <th onclick="sortTable('ldTable',4)">Target <span class="si">⇅</span></th>
         </tr></thead>
         <tbody id="ldBody">
           {lic_detail_rows() or '<tr><td colspan="5" class="no-data">No license issues found.</td></tr>'}
@@ -1607,6 +1629,16 @@ function recommendedLicense(licenses) {{
   )[0];
 }}
 
+function licenseRecommendation(group, licenses) {{
+  const relation = String(group.license_relation || 'REVIEW').toUpperCase();
+  if (relation === 'OR' && licenses.length > 1) {{
+    const recommended = recommendedLicense(licenses);
+    return `Nên chọn ${{recommended.license || '-'}} (${{recommended.severity || 'UNKNOWN'}})`;
+  }}
+  if (relation === 'AND') return 'Phải tuân thủ đồng thời tất cả license được liệt kê';
+  return 'Cần review thủ công trước khi quyết định nghĩa vụ license';
+}}
+
 function applyMergesAndStyle(ws, merges, headerRow, totalCols) {{
   ws['!merges'] = merges;
   // Header style: navy bg, white bold text
@@ -1693,7 +1725,7 @@ function buildVulnSheet() {{
 }}
 
 function buildLicSheet() {{
-  const rows=[['Package','License','Severity','ITS khuyến nghị đối với multiple license','File Path','Target']];
+  const rows=[['Package','License','Severity','License Relation','Compliance Requirement','Recommended Action','Target']];
   const merges = [];
   const rowHeights = [{{ hpt: 20 }}];
 
@@ -1706,28 +1738,27 @@ function buildLicSheet() {{
 
     if(lics.length === 0) {{
       const rowIndex = rows.length;
-      rows.push([g.pkg, '-', '-', '', '-', joinLines(targets)]);
+      rows.push([g.pkg, '-', '-', g.license_relation || 'REVIEW', g.compliance_requirement || 'Manual review required.', licenseRecommendation(g, lics), joinLines(targets)]);
       rowHeights[rowIndex] = {{ hpt: 24 }};
       return;
     }}
 
-    const recommended = lics.length > 1 ? recommendedLicense(lics) : null;
-    const recommendation = recommended ? `Nên chọn ${{recommended.license || '-'}} (${{recommended.severity || 'UNKNOWN'}})` : '';
+    const recommendation = licenseRecommendation(g, lics);
     const start = rows.length;
     lics.forEach((lc,idx)=>{{
-      const paths = lc.filepaths && lc.filepaths.length ? lc.filepaths : [lc.filepath || '-'];
       rows.push([
         idx === 0 ? g.pkg : '',
         lc.license || '-',
         lc.severity || 'UNKNOWN',
+        idx === 0 ? (g.license_relation || 'REVIEW') : '',
+        idx === 0 ? (g.compliance_requirement || 'Manual review required.') : '',
         idx === 0 ? recommendation : '',
-        joinLines(paths),
         idx === 0 ? joinLines(targets) : ''
       ]);
     }});
 
     const end = rows.length - 1;
-    [0,3,5].forEach(col=>mergeColumn(merges,start,end,col));
+    [0,3,4,5,6].forEach(col=>mergeColumn(merges,start,end,col));
 
     let runStart = start;
     let runSeverity = rows[start][2];
@@ -1745,8 +1776,7 @@ function buildLicSheet() {{
     const maxLines = Math.max(
       1,
       ...lics.map(lc => Math.max(
-        String(lc.license || '').split('\\n').length,
-        (lc.filepaths && lc.filepaths.length ? lc.filepaths : [lc.filepath || '-']).filter(Boolean).length
+        String(lc.license || '').split('\\n').length
       )),
       targets.length
     );
@@ -1755,9 +1785,9 @@ function buildLicSheet() {{
   }});
 
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[40,34,14,44,50,35].map(w=>{{return{{wch:w}}}});
+  ws['!cols']=[40,34,14,18,44,44,35].map(w=>{{return{{wch:w}}}});
   ws['!rows']=rowHeights;
-  applyMergesAndStyle(ws, merges, rows[0], 6);
+  applyMergesAndStyle(ws, merges, rows[0], 7);
   applySeverityColors(ws, 2);
   return ws;
 }}
@@ -1773,11 +1803,11 @@ function buildRemediationSheet() {{
 }}
 
 function buildComplianceSheet() {{
-  const rows=[['#','Package','Licenses','Highest Severity','Recommended Action','Decision','Approved By','Notes']];
-  LIC_GROUPS.forEach((g,i)=>rows.push([i+1,g.pkg,g.license_names.join(', '),g.highest_severity,g.action,'','','']));
+  const rows=[['#','Package','Licenses','Relation','Compliance Requirement','Highest Severity','Recommended Action','Decision','Approved By','Notes']];
+  LIC_GROUPS.forEach((g,i)=>rows.push([i+1,g.pkg,g.license_names.join(', '),g.license_relation || 'REVIEW',g.compliance_requirement || 'Manual review required.',g.highest_severity,g.action,'','','']));
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[4,40,45,12,16,12,15,30].map(w=>{{return{{wch:w}}}});
-  applyMergesAndStyle(ws,[],rows[0],8);
+  ws['!cols']=[4,40,45,14,44,12,16,12,15,30].map(w=>{{return{{wch:w}}}});
+  applyMergesAndStyle(ws,[],rows[0],10);
   applySeverityColors(ws, 3);
   return ws;
 }}
