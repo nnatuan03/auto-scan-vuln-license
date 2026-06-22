@@ -198,20 +198,22 @@ Với **mỗi** project / service:
    | Node.js (npm lock) | `npx --yes @cyclonedx/cyclonedx-npm --ignore-npm-errors --package-lock-only` | |
    | Node.js (yarn / pnpm / bun) | fallback `trivy fs` | |
    | .NET | `dotnet-CycloneDX <project> -j` | Nếu thiếu tool mà có `dotnet`, tự chạy `dotnet tool install --global CycloneDX`. |
-   | Flutter / Python / Go / PHP / Ruby / unknown | fallback `trivy fs` | |
+   | Flutter | fallback `trivy fs`, sau đó enrich license từ `pubspec.lock` / pub.dev trước normalize | Chỉ bổ sung license cho package đang thiếu, không ghi đè license đã có. |
+   | Python / Go / PHP / Ruby / unknown | fallback `trivy fs` | |
 
    Nếu generator riêng fail hoặc không sinh ra SBOM mới → fallback `trivy fs --format cyclonedx`.
 5. **Reconcile phiên bản** trong SBOM với phiên bản mới nhất tìm được trong mã nguồn / lock file hiện có. Ví dụ: Node có cả `package-lock.json` và `yarn.lock`, nếu SBOM ra `1.80.0` nhưng `package.json` / `yarn.lock` đang ở `1.84.0` — công cụ sẽ cập nhật SBOM lên `1.84.0` trước khi scan. Công cụ **không tự truy vấn registry** để nâng cấp dependency ngoài mã nguồn.
-6. **Chuẩn hóa license** thành `SBOM.cdx-fix.json`.
-7. **Chạy Trivy một lần duy nhất** cho mỗi service:
+6. **Enrich license Flutter** nếu service có `pubspec.lock`: đọc package/version hosted từ lock file, tra cứu best-effort trên pub.dev, ghi `pub-license-enrich.log` và cache `pub-license-cache.json`; package không đủ bằng chứng vẫn giữ `LicenseRef-No-Declared-License`.
+7. **Chuẩn hóa license** thành `SBOM.cdx-fix.json`.
+8. **Chạy Trivy một lần duy nhất** cho mỗi service:
    - `trivy sbom --scanners vuln,license --format json` → `report.json`.
    - Từ `report.json` tách ra `license.json`, `license.txt`, `vuln.json`.
    - Cách này giữ nguyên output như cũ nhưng giảm số lần gọi Trivy trên mỗi service.
-8. **Đối chiếu license** trong `SBOM.cdx-fix.json` với `report.json` / `license.json`; nếu Trivy trả thiếu license của package, công cụ tự bổ sung từ SBOM. Component không khai báo license sẽ hiện `LicenseRef-No-Declared-License` để không bị "mất im lặng".
-9. **Sinh báo cáo HTML** cho từng service:
+9. **Đối chiếu license** trong `SBOM.cdx-fix.json` với `report.json` / `license.json`; nếu Trivy trả thiếu license của package, công cụ tự bổ sung từ SBOM. Component không khai báo license sẽ hiện `LicenseRef-No-Declared-License` để không bị "mất im lặng".
+10. **Sinh báo cáo HTML** cho từng service:
    - `report.html`
    - `report-vuln.html`
-10. **Merge tất cả service** thành `consolidated-report.html`.
+11. **Merge tất cả service** thành `consolidated-report.html`.
 11. **Sinh debug report** `debug-report.md` / `debug-report.json` để đối chiếu với tài liệu và debug từng service.
 
 ---
@@ -227,6 +229,7 @@ Công cụ đang cover các case license / dependency scan trong tài liệu, tr
 | Maven license scan | Prebuild / install lib Maven nội bộ trong thư mục nguồn nếu service khác phụ thuộc, sau đó chạy `mvnw / mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom`. |
 | Node.js npm / package-lock license scan | Chạy `npx --yes @cyclonedx/cyclonedx-npm --ignore-npm-errors`; nếu có lock npm thì dùng `--package-lock-only`. |
 | .NET license scan | Tự cài `CycloneDX` nếu thiếu, rồi chạy `dotnet-CycloneDX` trên `.sln` / `.csproj`. |
+| Flutter license enrichment | Tự động đọc `pubspec.lock`, lấy license từ pub.dev cho package hosted còn thiếu license trong SBOM, có cache/log để audit. |
 | Normalize SBOM trước khi scan license | Tạo `SBOM.cdx-fix.json` bằng module normalize nội bộ. |
 | License TXT / JSON | Tạo `license.txt` và `license.json` cho từng service. |
 
@@ -255,6 +258,7 @@ auto-scan-vuln-lic/
 │   ├── debug_report.py         # Sinh debug report đối chiếu tài liệu, marker, command, count SBOM / license
 │   ├── dependency_health.py    # Phát hiện lock file thiếu / cũ và mismatch manifest ↔ lock trước khi sinh SBOM
 │   ├── detector.py             # Tự phát hiện Maven, Gradle, Node, Flutter, .NET, Python, Go, PHP, Ruby
+│   ├── flutter_license_enricher.py # Bổ sung license Flutter từ `pubspec.lock` / pub.dev trước normalize
 │   ├── license_inventory.py    # Bù license từ SBOM vào report nếu Trivy không trả đủ dòng license
 │   ├── license_normalizer.py   # Chuẩn hóa license SBOM về SPDX / LicenseRef
 │   ├── license_rules.py        # Bộ rule normalize license từ tên vendor / free-text về SPDX ID

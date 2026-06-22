@@ -4,4 +4,4 @@ scan-results/
 .DS_Store
 analysis/coroot-ee/
 outputs/coroot-ee-binary-analysis/
-tests/
+tests/__pycache__/

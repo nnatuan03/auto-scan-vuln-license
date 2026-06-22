@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .detector import detect_project
 from .dependency_health import analyze_dependency_health
+from .flutter_license_enricher import enrich_flutter_licenses
 from .license_normalizer import normalize_sbom
 from .models import Project, ScanResult
 from .reporting.reports import generate_single_report
@@ -74,6 +75,14 @@ def scan_project(project: Project | Path, output_dir: Path, trivy_only: bool = F
         result.debug["sbom_path"] = str(sbom)
         version_reconcile_stats = reconcile_sbom_versions(project, sbom, log_file)
         result.debug["version_reconcile_stats"] = version_reconcile_stats
+        if project.kind == "flutter":
+            pub_license_stats = enrich_flutter_licenses(
+                project.path,
+                sbom,
+                output_dir / "pub-license-cache.json",
+                output_dir / "pub-license-enrich.log",
+            )
+            result.debug["pub_license_enrich_stats"] = pub_license_stats
 
         fixed_sbom = output_dir / "SBOM.cdx-fix.json"
         license_log = output_dir / "license-normalize.log"

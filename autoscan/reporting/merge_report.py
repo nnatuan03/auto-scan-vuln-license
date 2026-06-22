@@ -171,6 +171,7 @@ def group_vulns(vuln_rows):
         version = (r.get("version") or "").strip() or "-"
         fixed = (r.get("fixed") or "").strip() or "-"
         dedup_key = (
+            r.get("folder", ""),
             r.get("cve", ""),
             version,
             fixed,
@@ -244,6 +245,8 @@ def _aggregate_vulns_by_cve(rows: list[dict]) -> list[dict]:
             "versions": [],
             "fixed_versions": [],
             "folders": [],
+            "affected_instances": [],
+            "_seen_instances": set(),
             "titles": [],
             "title": "",
             "url": row.get("url", ""),
@@ -257,6 +260,15 @@ def _aggregate_vulns_by_cve(rows: list[dict]) -> list[dict]:
         _append_unique(item["versions"], row.get("version"), keep_dash=True)
         _append_unique(item["fixed_versions"], row.get("fixed"))
         _append_unique(item["folders"], row.get("folder"))
+        instance = {
+            "service": str(row.get("folder") or "-").strip() or "-",
+            "version": str(row.get("version") or "-").strip() or "-",
+            "fixed": str(row.get("fixed") or "-").strip() or "-",
+        }
+        instance_key = (instance["service"], instance["version"], instance["fixed"])
+        if instance_key not in item["_seen_instances"]:
+            item["_seen_instances"].add(instance_key)
+            item["affected_instances"].append(instance)
         title = str(row.get("title") or "").strip()
         if title:
             _append_unique(item["titles"], title)
@@ -269,6 +281,8 @@ def _aggregate_vulns_by_cve(rows: list[dict]) -> list[dict]:
         item["versions"].sort()
         item["fixed_versions"].sort()
         item["folders"].sort()
+        item["affected_instances"].sort(key=lambda row: (row["service"].lower(), row["version"], row["fixed"]))
+        item.pop("_seen_instances", None)
         item["version"] = "\n".join(item["versions"])
         item["fixed"] = "\n".join(item["fixed_versions"]) if item["fixed_versions"] else "-"
 
@@ -435,6 +449,7 @@ def _merge_no_group_entries(groups: dict) -> dict:
             # call sites. We drop None / empty fields for robustness.
             signature = (
                 row.get("cve") or row.get("license") or "",
+                row.get("folder") if row.get("cve") else "",
                 row.get("version") or "",
                 row.get("fixed") or "",
                 row.get("severity") or "",
@@ -576,6 +591,20 @@ def paths_html(folders, max_show=4):
     html += '</div>'
     return html
 
+def affected_instances_html(instances, max_show=6):
+    if not instances:
+        return '<span style="color:#9ca3af;font-size:11px">-</span>'
+    lines = []
+    for item in instances:
+        service = str(item.get("service") or "-")
+        version = str(item.get("version") or "-")
+        fixed = str(item.get("fixed") or "-")
+        if fixed and fixed != "-":
+            lines.append(f"{service}: {version} → {fixed}")
+        else:
+            lines.append(f"{service}: {version}")
+    return paths_html(lines, max_show=max_show)
+
 
 def generate_html(be_dir, output_html):
     vuln_rows, lic_rows, folders_found, health_by_folder = load_all_reports(be_dir)
@@ -634,6 +663,15 @@ def generate_html(be_dir, output_html):
                 " ".join(version_lines),
                 " ".join(fixed_lines),
                 " ".join(r["folders"]),
+                " ".join(
+                    "{0} {1} {2}".format(
+                        item.get("service", ""),
+                        item.get("version", ""),
+                        item.get("fixed", ""),
+                    )
+                    for v in vulns
+                    for item in v.get("affected_instances", [])
+                ),
                 " ".join(title for v in vulns for title in v.get("titles", [])),
             ])
             rows += '<tbody class="vuln-group {0}" data-severity="{1}" data-severities="{2}" data-pkg="{3}" data-search="{4}" data-sort-package="{5}" data-sort-cve="{6}" data-sort-severity="{7}" data-sort-installed="{8}" data-sort-fix="{9}" data-sort-services="{10}">'.format(
@@ -673,7 +711,8 @@ def generate_html(be_dir, output_html):
                 rows += '<td>{0}</td>'.format(line_stack(v.get("versions") or ["-"]))
                 rows += '<td>{0}</td>'.format(line_stack(v.get("fixed_versions") or ["-"]))
                 if vuln_index == 0:
-                    rows += '<td class="vuln-merged-cell" rowspan="{0}">{1}</td>'.format(rowspan, line_stack(r["folders"]))
+                    instances = [item for vuln in vulns for item in vuln.get("affected_instances", [])]
+                    rows += '<td class="vuln-merged-cell" rowspan="{0}">{1}</td>'.format(rowspan, affected_instances_html(instances))
                 rows += '</tr>'
             rows += '</tbody>'
         return rows or '<tbody class="vuln-empty"><tr><td colspan="6" class="no-data">No vulnerabilities found.</td></tr></tbody>'
@@ -964,7 +1003,7 @@ def generate_html(be_dir, output_html):
         <th onclick="sortVulnTable(2)">Severity <span class="si">&#8645;</span></th>
         <th onclick="sortVulnTable(3)">Installed <span class="si">&#8645;</span></th>
         <th onclick="sortVulnTable(4)">Fix To <span class="si">&#8645;</span></th>
-        <th onclick="sortVulnTable(5)">Affected Services <span class="si">&#8645;</span></th>
+        <th onclick="sortVulnTable(5)">Affected Services / Versions <span class="si">&#8645;</span></th>
       </tr></thead>
       """ + vuln_table_rows() + """
     </table>
@@ -1264,8 +1303,18 @@ function joinLines(values) {
   return (list.length ? list : ['-']).join('\\n');
 }
 
+function joinAffectedInstances(instances, folders) {
+  const list = (instances || []).map(item => {
+    const service = String(item.service || '-').trim() || '-';
+    const version = String(item.version || '-').trim() || '-';
+    const fixed = String(item.fixed || '-').trim() || '-';
+    return fixed && fixed !== '-' ? `${service}: ${version} → ${fixed}` : `${service}: ${version}`;
+  }).filter(Boolean);
+  return list.length ? list.join('\\n') : joinLines(folders);
+}
+
 function buildVulnSheet() {
-  const rows = [['Package','CVE ID','Severity','Installed Version','Fix To','Affected Services']];
+  const rows = [['Package','CVE ID','Severity','Installed Version','Fix To','Affected Services / Versions']];
   const merges = [];
   const rowHeights = [{ hpt: 20 }];
 
@@ -1281,8 +1330,9 @@ function buildVulnSheet() {
     }
 
     const start = rows.length;
-    const services = g.folders && g.folders.length ? g.folders : ['-'];
-    const serviceLinesPerRow = Math.max(1, Math.ceil(services.length / cves.length));
+    const affectedInstances = cves.flatMap(cv => cv.affected_instances || []);
+    const affectedLines = affectedInstances.length ? affectedInstances : (g.folders || ['-']);
+    const serviceLinesPerRow = Math.max(1, Math.ceil(affectedLines.length / cves.length));
 
     cves.forEach((cv, idx) => {
       const versions = cv.versions && cv.versions.length ? cv.versions : [cv.version || '-'];
@@ -1294,7 +1344,7 @@ function buildVulnSheet() {
         cv.severity || 'UNKNOWN',
         joinLines(versions),
         joinLines(fixes),
-        idx === 0 ? joinLines(services) : '',
+        idx === 0 ? joinAffectedInstances(affectedInstances, g.folders) : '',
       ]);
       const rowLines = Math.max(1, versions.length, fixes.length, idx === 0 ? serviceLinesPerRow : 1);
       rowHeights[rowIndex] = { hpt: Math.max(18, Math.min(409.5, rowLines * 16)) };
