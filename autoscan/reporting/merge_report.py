@@ -131,7 +131,6 @@ def load_all_reports(be_dir):
                     "pkg":      pkg_name,
                     "license":  lc.get("Name", ""),
                     "severity": lc.get("Severity", "UNKNOWN"),
-                    "category": lc.get("Category", ""),
                     "filepath": lc.get("FilePath", "-") or "-",
                     "target":   result_target or "-",
                 })
@@ -285,13 +284,12 @@ def group_licenses(lic_rows):
             g["_display_name"] = r.get("pkg", "")
         if r["folder"] not in g["folders"]:
             g["folders"].append(r["folder"])
-        combo = (r.get("license", ""), r.get("severity", "UNKNOWN"), r.get("category", ""))
+        combo = (r.get("license", ""), r.get("severity", "UNKNOWN"))
         license_row = g["_licenses"].setdefault(combo, {
             "folder": r.get("folder", ""),
             "pkg": r.get("pkg", ""),
             "license": r.get("license", ""),
             "severity": r.get("severity", "UNKNOWN"),
-            "category": r.get("category", ""),
             "filepath": r.get("filepath", "-") or "-",
             "target": r.get("target", "-") or "-",
             "folders": [],
@@ -431,7 +429,6 @@ def _merge_no_group_entries(groups: dict) -> dict:
                 row.get("version") or "",
                 row.get("fixed") or "",
                 row.get("severity") or "",
-                row.get("category") or "",
                 row.get("title") or "",
             )
             if signature in seen_rows:
@@ -686,53 +683,38 @@ def generate_html(be_dir, output_html):
                 licenses = [{
                     "license": "-",
                     "severity": r.get("severity") or "UNKNOWN",
-                    "category": "-",
                     "folders": r.get("folders") or ["-"],
                     "filepaths": [],
                 }]
             rowspan = len(licenses)
             severity_attr = ",".join(unique_values(lic.get("severity", "") for lic in licenses))
-            category_attr = ",".join(unique_values(lic.get("category", "") for lic in licenses))
-            action_attr = ",".join(unique_values(get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))[0] for lic in licenses))
             license_sort = " ".join(lic.get("license", "") for lic in licenses)
-            category_sort = " ".join(lic.get("category", "") for lic in licenses)
-            action_sort = " ".join(get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))[0] for lic in licenses)
             search_text = " ".join([
                 r["pkg"],
                 license_sort,
                 severity_attr,
-                category_sort,
-                action_sort,
                 " ".join(r["folders"]),
                 " ".join(path for lic in licenses for path in lic.get("filepaths", [])),
             ])
-            rows += '<tbody class="lic-group {0}" data-severity="{1}" data-severities="{2}" data-categories="{3}" data-actions="{4}" data-pkg="{5}" data-search="{6}" data-sort-package="{7}" data-sort-license="{8}" data-sort-severity="{9}" data-sort-category="{10}" data-sort-action="{11}" data-sort-services="{12}">'.format(
+            rows += '<tbody class="lic-group {0}" data-severity="{1}" data-severities="{2}" data-pkg="{3}" data-search="{4}" data-sort-package="{5}" data-sort-license="{6}" data-sort-severity="{7}" data-sort-services="{8}">'.format(
                 group_bg,
                 escape(r["severity"]),
                 escape(severity_attr),
-                escape(category_attr),
-                escape(action_attr),
                 escape(r["pkg"]),
                 escape(search_text.lower()),
                 escape(r["pkg"].lower()),
                 escape(license_sort.lower()),
                 ORDER.get(r["severity"], 99),
-                escape(category_sort.lower()),
-                escape(action_sort.lower()),
                 escape(" ".join(r["folders"]).lower()),
             )
             for lic_index, lic in enumerate(licenses):
                 severity = lic.get("severity") or "UNKNOWN"
-                category = lic.get("category") or "-"
-                action, color = get_license_action(severity, category, lic.get("license", ""))
                 row_class = "grp-end" if lic_index == rowspan - 1 else "grp-mid"
-                rows += '<tr class="data-row lic-grp license-row {0} {1}" data-severity="{2}" data-severities="{3}" data-categories="{4}" data-actions="{5}" data-pkg="{6}">'.format(
+                rows += '<tr class="data-row lic-grp license-row {0} {1}" data-severity="{2}" data-severities="{3}" data-pkg="{4}">'.format(
                     group_bg,
                     row_class,
                     escape(severity),
                     escape(severity_attr),
-                    escape(category_attr),
-                    escape(action_attr),
                     escape(r["pkg"]),
                 )
                 if lic_index == 0:
@@ -743,13 +725,11 @@ def generate_html(be_dir, output_html):
                     ORDER.get(severity, 99),
                     escape(severity),
                 )
-                rows += '<td style="font-size:12px;color:#4a5568">{0}</td>'.format(escape(category))
-                rows += '<td>{0}</td>'.format(action_chip(action, color))
                 if lic_index == 0:
                     rows += '<td class="vuln-merged-cell" rowspan="{0}">{1}</td>'.format(rowspan, paths_html(r["folders"]))
                 rows += '</tr>'
             rows += '</tbody>'
-        return rows or '<tbody class="lic-empty"><tr><td colspan="6" class="no-data">No license issues found.</td></tr></tbody>'
+        return rows or '<tbody class="lic-empty"><tr><td colspan="4" class="no-data">No license issues found.</td></tr></tbody>'
 
     def metric_card(label, value, sub, color):
         return '<div class="metric-card"><div class="metric-value" style="color:{0}">{1}</div><div class="metric-label">{2}</div><div class="metric-sub">{3}</div></div>'.format(color, value, label, sub)
@@ -758,25 +738,6 @@ def generate_html(be_dir, output_html):
     for sev in ["CRITICAL", "HIGH", "MEDIUM", "LOW"]:
         metrics += metric_card(sev, vuln_sev.get(sev, 0), "CVEs", SEV_COLOR[sev])
     metrics += metric_card("SERVICES", len(folders_found), "scanned", "#3182ce")
-    metrics += metric_card(
-        "REPLACE",
-        sum(1 for g in lic_groups for lic in g.get("licenses", []) if get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))[0] == "Replace"),
-        "licenses",
-        "#e53e3e",
-    )
-    metrics += metric_card(
-        "REVIEW",
-        sum(1 for g in lic_groups for lic in g.get("licenses", []) if get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))[0] == "Review"),
-        "licenses",
-        "#dd8500",
-    )
-    metrics += metric_card(
-        "OK",
-        sum(1 for g in lic_groups for lic in g.get("licenses", []) if get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))[0] == "OK"),
-        "licenses",
-        "#2d9e5f",
-    )
-
     def stat_block(sev, count, tab, filter_id, filter_fn):
         c = SEV_COLOR.get(sev, "#718096")
         return '<div class="sev-stat" onclick="switchTab(\'{0}\');document.getElementById(\'{1}\').value=\'{2}\';{3}()"><div class="sev-stat-bar" style="background:{4}"></div><div class="sev-stat-number" style="color:{4}">{5:02d}</div><div class="sev-stat-label" style="color:{4}">{2}</div></div>'.format(
@@ -1005,7 +966,7 @@ def generate_html(be_dir, output_html):
   <div class="tab-panel" id="tab-lic">
     <div class="section-header">
       <span class="section-title">Licenses</span>
-      <span class="section-desc">""" + str(len(lic_groups)) + """ package rows &mdash; licenses, severities, categories, and actions are grouped per package</span>
+      <span class="section-desc">""" + str(len(lic_groups)) + """ package rows &mdash; licenses and severities are grouped per package</span>
     </div>
     <div class="legend-bar">
       <span class="legend-label">License Type</span>
@@ -1021,14 +982,6 @@ def generate_html(be_dir, output_html):
         <option value="">All Severities</option>
         <option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option><option>UNKNOWN</option>
       </select>
-      <select class="filter-select" id="licCatFilter" onchange="filterLic()">
-        <option value="">All Categories</option>
-        """ + cat_options + """
-      </select>
-      <select class="filter-select" id="licActFilter" onchange="filterLic()">
-        <option value="">All Actions</option>
-        <option>Replace</option><option>Review</option><option>OK</option>
-      </select>
       <button class="btn btn-ghost" onclick="resetLic()">Reset</button>
       <div class="toolbar-right">
         <button class="btn btn-success" onclick="exportExcel()">Export Excel</button>
@@ -1041,9 +994,7 @@ def generate_html(be_dir, output_html):
         <th onclick="sortLicTable(0)">Package <span class="si">&#8645;</span></th>
         <th onclick="sortLicTable(1)">License <span class="si">&#8645;</span></th>
         <th onclick="sortLicTable(2)">Severity <span class="si">&#8645;</span></th>
-        <th onclick="sortLicTable(3)">Category <span class="si">&#8645;</span></th>
-        <th onclick="sortLicTable(4)">Action <span class="si">&#8645;</span></th>
-        <th onclick="sortLicTable(5)">Affected Services <span class="si">&#8645;</span></th>
+        <th onclick="sortLicTable(3)">Affected Services <span class="si">&#8645;</span></th>
       </tr></thead>
       """ + lic_table_rows() + """
     </table>
@@ -1127,7 +1078,7 @@ function sortLicTable(col) {
   const groups = Array.from(table.querySelectorAll('tbody.lic-group'));
   const key = 'lic' + col;
   const asc = sortState[key] = !sortState[key];
-  const sortKeys = ['package', 'license', 'severity', 'category', 'action', 'services'];
+  const sortKeys = ['package', 'license', 'severity', 'services'];
   const sortKey = sortKeys[col] || 'package';
   groups.sort((a, b) => {
     const aVal = a.dataset['sort' + sortKey.charAt(0).toUpperCase() + sortKey.slice(1)] || '';
@@ -1159,15 +1110,11 @@ function filterVuln() {
 function filterLic() {
   const q   = document.getElementById('licSearch').value.toLowerCase();
   const sev = document.getElementById('licSevFilter').value;
-  const cat = document.getElementById('licCatFilter').value;
-  const act = document.getElementById('licActFilter').value;
   let c = 0;
   document.querySelectorAll('#licTable tbody.lic-group').forEach(group => {
     const text = group.dataset.search || group.innerText.toLowerCase();
     const severities = group.dataset.severities || group.dataset.severity || '';
-    const categories = (group.dataset.categories || '').toLowerCase().split(',');
-    const actions = (group.dataset.actions || '').toLowerCase().split(',');
-    const show = (!q||text.includes(q)) && (!sev||severities.split(',').includes(sev)) && (!cat||categories.includes(cat.toLowerCase())) && (!act||actions.includes(act.toLowerCase()));
+    const show = (!q||text.includes(q)) && (!sev||severities.split(',').includes(sev));
     group.classList.toggle('hidden', !show);
     if (show) c++;
   });
@@ -1175,7 +1122,7 @@ function filterLic() {
 }
 
 function resetVuln() { document.getElementById('vulnSearch').value=''; document.getElementById('vulnSevFilter').value=''; filterVuln(); }
-function resetLic()  { document.getElementById('licSearch').value=''; document.getElementById('licSevFilter').value=''; document.getElementById('licCatFilter').value=''; document.getElementById('licActFilter').value=''; filterLic(); }
+function resetLic()  { document.getElementById('licSearch').value=''; document.getElementById('licSevFilter').value=''; filterLic(); }
 
 function colRef(c) {
   let s=''; c++;
@@ -1202,6 +1149,18 @@ const VULN_SEVERITY_STYLES = {
 function sevRank(severity) {
   const idx = SEV.indexOf(severity);
   return idx === -1 ? 99 : idx;
+}
+
+function recommendationRank(severity) {
+  const idx = ['LOW','MEDIUM','HIGH','CRITICAL','UNKNOWN'].indexOf(String(severity || '').toUpperCase());
+  return idx === -1 ? 99 : idx;
+}
+
+function recommendedLicense(licenses) {
+  return [...licenses].sort((a,b) =>
+    recommendationRank(a.severity) - recommendationRank(b.severity)
+    || String(a.license || '').localeCompare(String(b.license || ''))
+  )[0];
 }
 
 function highestSeverityRank(rows) {
@@ -1297,16 +1256,6 @@ function joinLines(values) {
   return (list.length ? list : ['-']).join('\\n');
 }
 
-function actionForLicense(lc) {
-  const sev = String(lc.severity || '').toUpperCase();
-  const cat = String(lc.category || '').toLowerCase();
-  const name = String(lc.license || '');
-  if (['CRITICAL','HIGH'].includes(sev) || cat.includes('restricted') || cat.includes('forbidden')) return 'Replace';
-  if (['MEDIUM','LOW'].includes(sev) || cat.includes('reciprocal') || cat.includes('notice')) return 'Review';
-  if (name.startsWith('LicenseRef-') || sev === 'UNKNOWN' || !cat || cat === 'unknown') return 'Review';
-  return 'OK';
-}
-
 function buildVulnSheet() {
   const rows = [['Package','CVE ID','Severity','Installed Version','Fix To','Affected Services']];
   const merges = [];
@@ -1357,7 +1306,7 @@ function buildVulnSheet() {
 }
 
 function buildLicSheet() {
-  const rows = [['Package','License','Severity','Category','Action','File Paths','Affected Services']];
+  const rows = [['Package','License','Severity','ITS khuyến nghị đối với multiple license','File Paths','Affected Services']];
   const merges = [];
   const rowHeights = [{ hpt: 20 }];
 
@@ -1368,29 +1317,30 @@ function buildLicSheet() {
     );
     if (lics.length === 0) {
       const rowIndex = rows.length;
-      rows.push([g.pkg, '-', '-', '-', '-', '-', joinLines(g.folders)]);
+      rows.push([g.pkg, '-', '-', '', '-', joinLines(g.folders)]);
       rowHeights[rowIndex] = { hpt: 24 };
       return;
     }
 
     const start = rows.length;
     const services = g.folders && g.folders.length ? g.folders : ['-'];
+    const recommended = lics.length > 1 ? recommendedLicense(lics) : null;
+    const recommendation = recommended ? `Nên chọn ${recommended.license || '-'} (${recommended.severity || 'UNKNOWN'})` : '';
 
     lics.forEach((lc, idx) => {
       rows.push([
         idx === 0 ? g.pkg : '',
         lc.license || '-',
         lc.severity || 'UNKNOWN',
-        lc.category || '-',
-        actionForLicense(lc),
+        idx === 0 ? recommendation : '',
         joinLines(lc.filepaths || [lc.filepath || '-']),
         idx === 0 ? joinLines(services) : '',
       ]);
     });
 
     const end = rows.length - 1;
-    // Merge Package (col 0) and Affected Services (col 6) across the group.
-    [0, 6].forEach(col => mergeColumn(merges, start, end, col));
+    // Merge Package, recommendation, and Affected Services across the group.
+    [0, 3, 5].forEach(col => mergeColumn(merges, start, end, col));
 
     // Merge consecutive rows that share the same severity (col 2),
     // then blank the repeated severity cell so the merge is clean.
@@ -1407,12 +1357,11 @@ function buildLicSheet() {
       runSeverity = severity;
     }
 
-    // Row height scaled by the tallest column (license, category, file paths, services).
+    // Row height scaled by the tallest column (license, file paths, services).
     const maxLines = Math.max(
       1,
       ...lics.map(lc => Math.max(
         String(lc.license || '').split('\\n').length,
-        String(lc.category || '').split('\\n').length,
         (lc.filepaths || [lc.filepath || '-']).filter(Boolean).length,
       )),
       services.length
@@ -1422,10 +1371,10 @@ function buildLicSheet() {
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [38, 34, 14, 20, 16, 50, 35].map(w => ({ wch: w }));
+  ws['!cols'] = [38, 34, 14, 44, 50, 35].map(w => ({ wch: w }));
   ws['!rows'] = rowHeights;
   ws['!merges'] = merges;
-  applyVulnSheetStyle(ws, rows.length, 7);
+  applyVulnSheetStyle(ws, rows.length, 6);
   applySeverityColors(ws, 2, SEVERITY_STYLES, 'left');
   return ws;
 }

@@ -123,12 +123,11 @@ def licenses_from_sbom(sbom_path: Path) -> list[dict[str, str]]:
             names = ["LicenseRef-No-Declared-License"]
 
         for name in dict.fromkeys(names):
-            severity, category = classify_license(name)
+            severity, _ = classify_license(name)
             rows.append({
                 "PkgName": package,
                 "Name": name,
                 "Severity": severity,
-                "Category": category,
                 "FilePath": target,
             })
     return rows

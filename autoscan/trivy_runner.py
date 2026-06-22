@@ -41,7 +41,7 @@ def _append_unique(values: list[str], value: object, *, keep_dash: bool = False)
 
 def _dedupe_license_report(data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, int]]:
     copied = _license_only_report(data)
-    grouped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
     raw_count = 0
 
     for result in copied.get("Results") or []:
@@ -55,19 +55,18 @@ def _dedupe_license_report(data: dict[str, Any]) -> tuple[dict[str, Any], dict[s
             package = str(item.get("PkgName") or item.get("Package") or "").strip()
             license_name = str(item.get("Name") or "").strip()
             severity = str(item.get("Severity") or "UNKNOWN").strip() or "UNKNOWN"
-            category = str(item.get("Category") or "").strip()
-            key = (canonical_pkg_key(package) or package, license_name, severity, category)
+            key = (canonical_pkg_key(package) or package, license_name, severity)
             grouped_item = grouped.setdefault(key, {
                 **item,
                 "PkgName": package,
                 "Name": license_name,
                 "Severity": severity,
-                "Category": category,
                 "Target": target,
                 "_AutoScanTargets": [],
                 "_AutoScanFilePaths": [],
                 "_AutoScanOccurrences": 0,
             })
+            grouped_item.pop("Category", None)
             grouped_item["_AutoScanOccurrences"] += 1
             _append_unique(grouped_item["_AutoScanTargets"], target, keep_dash=True)
             _append_unique(grouped_item["_AutoScanFilePaths"], item.get("FilePath"))
@@ -78,7 +77,6 @@ def _dedupe_license_report(data: dict[str, Any]) -> tuple[dict[str, Any], dict[s
             canonical_pkg_key(row.get("PkgName") or row.get("Package") or ""),
             str(row.get("Name") or "").lower(),
             str(row.get("Severity") or "UNKNOWN"),
-            str(row.get("Category") or "").lower(),
         ),
     )
     for item in deduped:
@@ -153,7 +151,7 @@ def _license_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _write_license_table(data: dict[str, Any], output_path: Path) -> None:
-    headers = ["Target", "Package", "License", "Severity", "Category", "FilePath"]
+    headers = ["Target", "Package", "License", "Severity", "FilePath"]
     rows = _license_rows(data)
     with output_path.open("w", encoding="utf-8") as fh:
         fh.write("\t".join(headers) + "\n")
@@ -163,7 +161,6 @@ def _write_license_table(data: dict[str, Any], output_path: Path) -> None:
                 row.get("PkgName") or row.get("Package") or "-",
                 row.get("Name") or "-",
                 row.get("Severity") or "-",
-                row.get("Category") or "-",
                 row.get("FilePath") or "-",
             ]
             fh.write("\t".join(str(value).replace("\t", " ") for value in values) + "\n")

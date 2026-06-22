@@ -164,14 +164,12 @@ def _group_license_rows(license_rows):
         combo = (
             row.get("license", ""),
             row.get("severity", "UNKNOWN"),
-            row.get("category", ""),
         )
         lic = group["_licenses"].setdefault(combo, {
             "target": target,
             "pkg": row.get("pkg", ""),
             "license": row.get("license", ""),
             "severity": row.get("severity", "UNKNOWN"),
-            "category": row.get("category", ""),
             "filepath": "-",
             "targets": [],
             "folders": [],
@@ -197,7 +195,6 @@ def _group_license_rows(license_rows):
         licenses.sort(key=lambda row: (
             SEVERITY_ORDER.get(row.get("severity"), 99),
             str(row.get("license") or "").lower(),
-            str(row.get("category") or "").lower(),
         ))
         severities = [lic.get("severity") or "UNKNOWN" for lic in licenses]
         highest = get_highest_severity(severities)
@@ -274,7 +271,6 @@ def generate_html(report_path="report.json", output_path="report.html"):
                 "pkg": pkg_name,
                 "license": lic.get("Name", ""),
                 "severity": lic.get("Severity", "UNKNOWN"),
-                "category": lic.get("Category", ""),
                 "filepath": lic.get("FilePath", "-"),
             })
 
@@ -459,28 +455,13 @@ def generate_html(report_path="report.json", output_path="report.html"):
         lics = sorted(g["lics"], key=lambda lc: (SEVERITY_ORDER.get(lc["severity"], 99), lc["license"].lower()))
         lic_lines = [lic_chip(lc["license"]) for lc in lics]
         severity_lines = [sev_chip(lc["severity"]) for lc in lics]
-        category_lines = [lc.get("category", "-") or "-" for lc in lics]
-        action_lines = []
-        for lc in lics:
-            lc_action, lc_color = get_license_action(lc["severity"], lc.get("category", ""), lc.get("license", ""))
-            action_lines.append(action_chip(lc_action, lc_color))
         severity_attr = ",".join(unique_values(lc["severity"] for lc in lics))
-        category_attr = ",".join(unique_values(lc.get("category", "") for lc in lics))
-        action_attr = ",".join(unique_values(
-            action
-            for action, _ in (
-                get_license_action(lc["severity"], lc.get("category", ""), lc.get("license", ""))
-                for lc in lics
-            )
-        ))
         target_html = line_stack(g.get("targets") or [g.get("target", "-")])
         lic_summary_rows += f"""
-        <tr class="data-row lic-row" data-idx="{i}" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}" data-categories="{escape(category_attr)}" data-actions="{escape(action_attr)}" data-sev-order="{sev_order}">
+        <tr class="data-row lic-row" data-idx="{i}" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}" data-sev-order="{sev_order}">
             <td><span class="pkg-name">{escape(g['pkg'])}</span></td>
             <td style="max-width:280px">{html_line_stack(lic_lines)}</td>
             <td data-value="{sev_order}">{html_line_stack(severity_lines)}</td>
-            <td style="color:#4a5568;font-size:12px">{line_stack(category_lines)}</td>
-            <td>{html_line_stack(action_lines)}</td>
             <td><span class="count-pill">{g['lic_count']}</span></td>
             <td class="dim-text">{target_html}</td>
         </tr>"""
@@ -493,31 +474,16 @@ def generate_html(report_path="report.json", output_path="report.html"):
             sev_order = SEVERITY_ORDER.get(g["highest_severity"], 99)
             lic_lines = [lic_chip(lc["license"]) for lc in lics]
             severity_lines = [sev_chip(lc["severity"]) for lc in lics]
-            category_lines = [lc.get("category", "-") or "-" for lc in lics]
             filepath_lines = [
                 "; ".join(lc.get("filepaths") or [lc.get("filepath", "-") or "-"])
                 for lc in lics
             ]
-            action_lines = []
-            for lc in lics:
-                act, act_color = get_license_action(lc["severity"], lc.get("category", ""), lc.get("license", ""))
-                action_lines.append(action_chip(act, act_color))
             severity_attr = ",".join(unique_values(lc["severity"] for lc in lics))
-            category_attr = ",".join(unique_values(lc.get("category", "") for lc in lics))
-            action_attr = ",".join(unique_values(
-                action
-                for action, _ in (
-                    get_license_action(lc["severity"], lc.get("category", ""), lc.get("license", ""))
-                    for lc in lics
-                )
-            ))
             target_html = line_stack(g.get("targets") or [g.get("target", "-")])
-            rows += f"""<tr class="data-row" data-count="{len(lics)}" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}" data-categories="{escape(category_attr)}" data-actions="{escape(action_attr)}">
+            rows += f"""<tr class="data-row" data-count="{len(lics)}" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}">
                 <td class="pkg-name">{escape(g['pkg'])}</td>
                 <td>{html_line_stack(lic_lines)}</td>
                 <td data-value="{sev_order}">{html_line_stack(severity_lines)}</td>
-                <td style="color:#4a5568;font-size:12px">{line_stack(category_lines)}</td>
-                <td>{html_line_stack(action_lines)}</td>
                 <td class="dim-text" style="font-size:11px">{line_stack(filepath_lines)}</td>
                 <td class="dim-text">{target_html}</td>
             </tr>"""
@@ -536,12 +502,6 @@ def generate_html(report_path="report.json", output_path="report.html"):
             severity = lic.get("severity") or "UNKNOWN"
             lic_sev[severity] = lic_sev.get(severity, 0) + 1
 
-    action_counts = {"Replace": 0, "Review": 0, "OK": 0}
-    for g in lic_groups:
-        for lic in g["lics"]:
-            action, _ = get_license_action(lic.get("severity", ""), lic.get("category", ""), lic.get("license", ""))
-            action_counts[action] = action_counts.get(action, 0) + 1
-
     # ── METRIC CARDS ──
     def metric_card(label, value, sub, accent):
         return f"""<div class="metric-card">
@@ -556,10 +516,6 @@ def generate_html(report_path="report.json", output_path="report.html"):
         _, color = sev_style.get(sev, ("", "#718096"))
         metrics_html += metric_card(sev, count, "vulnerabilities", color)
     metrics_html += metric_card("PACKAGES", len(pkg_groups), "affected", "#3182ce")
-    metrics_html += metric_card("REPLACE", action_counts["Replace"], "licenses", "#e53e3e")
-    metrics_html += metric_card("REVIEW", action_counts["Review"], "licenses", "#dd8500")
-    metrics_html += metric_card("COMPLIANT", action_counts["OK"], "licenses", "#2d9e5f")
-
     all_categories = sorted({cat for group in lic_groups for cat in group.get("categories", []) if cat})
     cat_options = "\n".join(f'<option value="{c}">{c}</option>' for c in all_categories)
 
@@ -1401,7 +1357,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
   <div class="tab-panel" id="tab-lic-sum">
     <div class="section-header">
       <span class="section-title">License Summary by Package</span>
-      <span class="section-desc">{len(lic_groups)} packages — licenses, severities, categories, and actions are grouped per package</span>
+      <span class="section-desc">{len(lic_groups)} packages — licenses and severities are grouped per package</span>
     </div>
     <div class="legend-bar">
       <span class="legend-label">License Type</span>
@@ -1417,14 +1373,6 @@ def generate_html(report_path="report.json", output_path="report.html"):
         <option value="">All Severities</option>
         <option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option><option>UNKNOWN</option>
       </select>
-      <select class="filter-select" id="lsCatFilter" onchange="filterLS()">
-        <option value="">All Categories</option>
-        {cat_options}
-      </select>
-      <select class="filter-select" id="lsActionFilter" onchange="filterLS()">
-        <option value="">All Actions</option>
-        <option>Replace</option><option>Review</option><option>OK</option>
-      </select>
       <button class="btn btn-ghost" onclick="resetLS()">Reset</button>
       <div class="toolbar-right">
         <button class="btn btn-success" onclick="exportExcel()">Export Excel</button>
@@ -1438,13 +1386,11 @@ def generate_html(report_path="report.json", output_path="report.html"):
           <th onclick="sortTable('lsTable',0)">Package <span class="si">⇅</span></th>
           <th>Licenses</th>
           <th onclick="sortTable('lsTable',2)">Severity <span class="si">⇅</span></th>
-          <th onclick="sortTable('lsTable',3)">Category <span class="si">⇅</span></th>
-          <th onclick="sortTable('lsTable',4)">Action <span class="si">⇅</span></th>
-          <th onclick="sortTable('lsTable',5)">Count <span class="si">⇅</span></th>
+          <th onclick="sortTable('lsTable',3)">Count <span class="si">⇅</span></th>
           <th>Target</th>
         </tr></thead>
         <tbody id="lsBody">
-          {lic_summary_rows or '<tr><td colspan="7" class="no-data">No license issues found.</td></tr>'}
+          {lic_summary_rows or '<tr><td colspan="5" class="no-data">No license issues found.</td></tr>'}
         </tbody>
       </table>
       </div>
@@ -1463,14 +1409,6 @@ def generate_html(report_path="report.json", output_path="report.html"):
         <option value="">All Severities</option>
         <option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option><option>UNKNOWN</option>
       </select>
-      <select class="filter-select" id="ldCatFilter" onchange="filterLD()">
-        <option value="">All Categories</option>
-        {cat_options}
-      </select>
-      <select class="filter-select" id="ldActionFilter" onchange="filterLD()">
-        <option value="">All Actions</option>
-        <option>Replace</option><option>Review</option><option>OK</option>
-      </select>
       <button class="btn btn-ghost" onclick="resetLD()">Reset</button>
       <div class="toolbar-right">
         <button class="btn btn-success" onclick="exportExcel()">Export Excel</button>
@@ -1484,13 +1422,11 @@ def generate_html(report_path="report.json", output_path="report.html"):
           <th onclick="sortTable('ldTable',0)">Package <span class="si">⇅</span></th>
           <th onclick="sortTable('ldTable',1)">License <span class="si">⇅</span></th>
           <th onclick="sortTable('ldTable',2)">Severity <span class="si">⇅</span></th>
-          <th onclick="sortTable('ldTable',3)">Category <span class="si">⇅</span></th>
-          <th onclick="sortTable('ldTable',4)">Action <span class="si">⇅</span></th>
-          <th onclick="sortTable('ldTable',5)">File Path <span class="si">⇅</span></th>
+          <th onclick="sortTable('ldTable',3)">File Path <span class="si">⇅</span></th>
           <th>Target</th>
         </tr></thead>
         <tbody id="ldBody">
-          {lic_detail_rows() or '<tr><td colspan="7" class="no-data">No license issues found.</td></tr>'}
+          {lic_detail_rows() or '<tr><td colspan="5" class="no-data">No license issues found.</td></tr>'}
         </tbody>
       </table>
       </div>
@@ -1608,15 +1544,11 @@ function filterVD() {{
 function filterLS() {{
   const q=document.getElementById('lsSearch').value.toLowerCase();
   const sev=document.getElementById('lsSevFilter').value;
-  const cat=document.getElementById('lsCatFilter').value;
-  const act=document.getElementById('lsActionFilter').value;
   let c=0;
   document.querySelectorAll('#lsBody tr.lic-row').forEach(tr=>{{
     const text=tr.innerText.toLowerCase();
     const severities = tr.dataset.severities || tr.dataset.severity || '';
-    const categories = (tr.dataset.categories || '').toLowerCase().split(',');
-    const actions = (tr.dataset.actions || '').toLowerCase().split(',');
-    const show=(!q||text.includes(q))&&(!sev||severities.split(',').includes(sev))&&(!cat||categories.includes(cat.toLowerCase()))&&(!act||actions.includes(act.toLowerCase()));
+    const show=(!q||text.includes(q))&&(!sev||severities.split(',').includes(sev));
     tr.classList.toggle('hidden',!show);
     document.querySelectorAll('.detail-lic-'+tr.dataset.idx).forEach(r=>r.classList.toggle('hidden',!show));
     if(show)c++;
@@ -1627,15 +1559,11 @@ function filterLS() {{
 function filterLD() {{
   const q=document.getElementById('ldSearch').value.toLowerCase();
   const sev=document.getElementById('ldSevFilter').value;
-  const cat=document.getElementById('ldCatFilter').value;
-  const act=document.getElementById('ldActionFilter').value;
   let c=0;
   document.querySelectorAll('#ldBody tr').forEach(tr=>{{
     const text=tr.innerText.toLowerCase();
     const severities = tr.dataset.severities || tr.dataset.severity || '';
-    const categories = (tr.dataset.categories || '').toLowerCase().split(',');
-    const actions = (tr.dataset.actions || '').toLowerCase().split(',');
-    const show=(!q||text.includes(q))&&(!sev||severities.split(',').includes(sev))&&(!cat||categories.includes(cat.toLowerCase()))&&(!act||actions.includes(act.toLowerCase()));
+    const show=(!q||text.includes(q))&&(!sev||severities.split(',').includes(sev));
     tr.classList.toggle('hidden',!show);if(show)c += parseInt(tr.dataset.count || '1', 10);
   }});
   document.getElementById('ldCount').textContent=c+' licenses';
@@ -1643,8 +1571,8 @@ function filterLD() {{
 
 function resetVS(){{document.getElementById('vsSearch').value='';document.getElementById('vsSevFilter').value='';filterVS();}}
 function resetVD(){{document.getElementById('vdSearch').value='';document.getElementById('vdSevFilter').value='';filterVD();}}
-function resetLS(){{document.getElementById('lsSearch').value='';document.getElementById('lsSevFilter').value='';document.getElementById('lsCatFilter').value='';document.getElementById('lsActionFilter').value='';filterLS();}}
-function resetLD(){{document.getElementById('ldSearch').value='';document.getElementById('ldSevFilter').value='';document.getElementById('ldCatFilter').value='';document.getElementById('ldActionFilter').value='';filterLD();}}
+function resetLS(){{document.getElementById('lsSearch').value='';document.getElementById('lsSevFilter').value='';filterLS();}}
+function resetLD(){{document.getElementById('ldSearch').value='';document.getElementById('ldSevFilter').value='';filterLD();}}
 
 // ── EXPORT EXCEL ──
 function colRef(c) {{
@@ -1665,6 +1593,18 @@ const SEVERITY_STYLES = {{
 function sevRank(severity) {{
   const idx = SEV.indexOf(severity);
   return idx === -1 ? 99 : idx;
+}}
+
+function recommendationRank(severity) {{
+  const idx = ['LOW','MEDIUM','HIGH','CRITICAL','UNKNOWN'].indexOf(String(severity || '').toUpperCase());
+  return idx === -1 ? 99 : idx;
+}}
+
+function recommendedLicense(licenses) {{
+  return [...licenses].sort((a,b)=>
+    recommendationRank(a.severity)-recommendationRank(b.severity)
+    || String(a.license || '').localeCompare(String(b.license || ''))
+  )[0];
 }}
 
 function applyMergesAndStyle(ws, merges, headerRow, totalCols) {{
@@ -1753,7 +1693,7 @@ function buildVulnSheet() {{
 }}
 
 function buildLicSheet() {{
-  const rows=[['Package','License','Severity','Category','Action','File Path','Target']];
+  const rows=[['Package','License','Severity','ITS khuyến nghị đối với multiple license','File Path','Target']];
   const merges = [];
   const rowHeights = [{{ hpt: 20 }}];
 
@@ -1766,11 +1706,13 @@ function buildLicSheet() {{
 
     if(lics.length === 0) {{
       const rowIndex = rows.length;
-      rows.push([g.pkg, '-', '-', '-', '-', '-', joinLines(targets)]);
+      rows.push([g.pkg, '-', '-', '', '-', joinLines(targets)]);
       rowHeights[rowIndex] = {{ hpt: 24 }};
       return;
     }}
 
+    const recommended = lics.length > 1 ? recommendedLicense(lics) : null;
+    const recommendation = recommended ? `Nên chọn ${{recommended.license || '-'}} (${{recommended.severity || 'UNKNOWN'}})` : '';
     const start = rows.length;
     lics.forEach((lc,idx)=>{{
       const paths = lc.filepaths && lc.filepaths.length ? lc.filepaths : [lc.filepath || '-'];
@@ -1778,15 +1720,14 @@ function buildLicSheet() {{
         idx === 0 ? g.pkg : '',
         lc.license || '-',
         lc.severity || 'UNKNOWN',
-        lc.category || '-',
-        lc.action || '-',
+        idx === 0 ? recommendation : '',
         joinLines(paths),
         idx === 0 ? joinLines(targets) : ''
       ]);
     }});
 
     const end = rows.length - 1;
-    [0,6].forEach(col=>mergeColumn(merges,start,end,col));
+    [0,3,5].forEach(col=>mergeColumn(merges,start,end,col));
 
     let runStart = start;
     let runSeverity = rows[start][2];
@@ -1805,7 +1746,6 @@ function buildLicSheet() {{
       1,
       ...lics.map(lc => Math.max(
         String(lc.license || '').split('\\n').length,
-        String(lc.category || '').split('\\n').length,
         (lc.filepaths && lc.filepaths.length ? lc.filepaths : [lc.filepath || '-']).filter(Boolean).length
       )),
       targets.length
@@ -1815,9 +1755,9 @@ function buildLicSheet() {{
   }});
 
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[40,34,14,20,16,50,35].map(w=>{{return{{wch:w}}}});
+  ws['!cols']=[40,34,14,44,50,35].map(w=>{{return{{wch:w}}}});
   ws['!rows']=rowHeights;
-  applyMergesAndStyle(ws, merges, rows[0], 7);
+  applyMergesAndStyle(ws, merges, rows[0], 6);
   applySeverityColors(ws, 2);
   return ws;
 }}
