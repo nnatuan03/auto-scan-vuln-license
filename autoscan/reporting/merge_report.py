@@ -15,10 +15,12 @@ from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
 
+from autoscan.license_inventory import classify_license
 from autoscan.license_policy import is_manifest_package_name
 from autoscan.package_names import canonical_pkg_key, resolve_package_name
 
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
+NO_DECLARED_LICENSE = "LicenseRef-No-Declared-License"
 
 
 def get_highest_severity(severities):
@@ -301,6 +303,11 @@ def group_licenses(lic_rows):
         "_display_name": "",
     })
     for r in lic_rows:
+        license_name = str(r.get("license", "") or "").strip()
+        severity, category = classify_license(license_name)
+        source_severity = str(r.get("severity") or "UNKNOWN").strip().upper() or "UNKNOWN"
+        if severity == "UNKNOWN" and source_severity in SEVERITY_ORDER:
+            severity = source_severity
         # Use a canonical key (group/name lower-cased) so the same package
         # spelled "ch.qos.logback/logback-classic" or "ch.qos.logback:logback-classic"
         # ends up in the same group instead of being reported twice.
@@ -310,12 +317,13 @@ def group_licenses(lic_rows):
             g["_display_name"] = r.get("pkg", "")
         if r["folder"] not in g["folders"]:
             g["folders"].append(r["folder"])
-        combo = (r.get("license", ""), r.get("severity", "UNKNOWN"))
+        combo = (license_name, severity, category)
         license_row = g["_licenses"].setdefault(combo, {
             "folder": r.get("folder", ""),
             "pkg": r.get("pkg", ""),
-            "license": r.get("license", ""),
-            "severity": r.get("severity", "UNKNOWN"),
+            "license": license_name,
+            "severity": severity,
+            "category": category,
             "filepath": r.get("filepath", "-") or "-",
             "target": r.get("target", "-") or "-",
             "folders": [],
@@ -328,6 +336,9 @@ def group_licenses(lic_rows):
 
     for g in groups.values():
         rows = list(g["_licenses"].values())
+        has_declared_license = any(row.get("license") != NO_DECLARED_LICENSE for row in rows)
+        if has_declared_license:
+            rows = [row for row in rows if row.get("license") != NO_DECLARED_LICENSE]
         for row in rows:
             if not row["folders"]:
                 row["folders"].append(row.get("folder") or "-")

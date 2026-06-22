@@ -1,4 +1,4 @@
-from autoscan.reporting.merge_report import group_vulns
+from autoscan.reporting.merge_report import group_licenses, group_vulns
 
 
 def test_group_vulns_preserves_service_version_mapping():
@@ -43,3 +43,79 @@ def test_group_vulns_preserves_service_version_mapping():
         {"service": "service-b", "version": "4.17.19", "fixed": "4.17.21"},
         {"service": "service-c", "version": "4.17.15", "fixed": "4.17.21"},
     ]
+
+def test_group_licenses_drops_no_declared_when_detected_license_exists():
+    groups = group_licenses([
+        {
+            "folder": "svc",
+            "pkg": "fake_async",
+            "license": "Apache-2.0",
+            "severity": "LOW",
+            "filepath": "pkg:pub/fake_async@1.0.0",
+            "target": "SBOM.cdx-fix.json",
+        },
+        {
+            "folder": "svc",
+            "pkg": "fake_async",
+            "license": "LicenseRef-No-Declared-License",
+            "severity": "UNKNOWN",
+            "filepath": "pkg:pub/fake_async@1.0.0",
+            "target": "SBOM.cdx-fix.json",
+        },
+    ])
+
+    assert len(groups) == 1
+    assert [row["license"] for row in groups[0]["licenses"]] == ["Apache-2.0"]
+    assert groups[0]["severity"] == "LOW"
+
+def test_group_licenses_normalizes_license_ref_severity_before_dedupe():
+    groups = group_licenses([
+        {
+            "folder": "svc",
+            "pkg": "javax.activation:javax.activation-api",
+            "license": "LicenseRef-CDDL-GPLv2-CE",
+            "severity": "HIGH",
+            "filepath": "pkg:maven/javax.activation/javax.activation-api@1.2.0",
+            "target": "SBOM.cdx-fix.json",
+        },
+        {
+            "folder": "svc",
+            "pkg": "javax.activation:javax.activation-api",
+            "license": "LicenseRef-CDDL-GPLv2-CE",
+            "severity": "UNKNOWN",
+            "filepath": "pkg:maven/javax.activation/javax.activation-api@1.2.0",
+            "target": "SBOM.cdx-fix.json",
+        },
+    ])
+
+    assert len(groups) == 1
+    assert [(row["license"], row["severity"]) for row in groups[0]["licenses"]] == [
+        ("LicenseRef-CDDL-GPLv2-CE", "HIGH")
+    ]
+    assert groups[0]["severity"] == "HIGH"
+
+def test_group_licenses_classifies_classpath_exception_license_ref_as_high():
+    groups = group_licenses([
+        {
+            "folder": "svc",
+            "pkg": "jakarta.transaction:jakarta.transaction-api",
+            "license": "LicenseRef-GPL-2-0-only-WITH-classpath-exception",
+            "severity": "MEDIUM",
+            "filepath": "pkg:maven/jakarta.transaction/jakarta.transaction-api@1.3.3",
+            "target": "SBOM.cdx-fix.json",
+        },
+        {
+            "folder": "svc",
+            "pkg": "jakarta.transaction:jakarta.transaction-api",
+            "license": "LicenseRef-GPL-2-0-only-WITH-classpath-exception",
+            "severity": "UNKNOWN",
+            "filepath": "pkg:maven/jakarta.transaction/jakarta.transaction-api@1.3.3",
+            "target": "SBOM.cdx-fix.json",
+        },
+    ])
+
+    assert len(groups) == 1
+    assert [(row["license"], row["severity"]) for row in groups[0]["licenses"]] == [
+        ("LicenseRef-GPL-2-0-only-WITH-classpath-exception", "HIGH")
+    ]
+    assert groups[0]["severity"] == "HIGH"

@@ -80,8 +80,9 @@ def _dedupe_license_report(data: dict[str, Any]) -> tuple[dict[str, Any], dict[s
             _append_unique(grouped_item["_AutoScanTargets"], target, keep_dash=True)
             _append_unique(grouped_item["_AutoScanFilePaths"], item.get("FilePath"))
 
+    filtered_values = _drop_redundant_no_declared_licenses(list(grouped.values()))
     deduped = sorted(
-        grouped.values(),
+        filtered_values,
         key=lambda row: (
             canonical_pkg_key(row.get("PkgName") or row.get("Package") or ""),
             str(row.get("Name") or "").lower(),
@@ -118,6 +119,21 @@ def _dedupe_license_report(data: dict[str, Any]) -> tuple[dict[str, Any], dict[s
         "duplicates_removed": max(raw_count - len(deduped), 0),
     }
 
+
+def _drop_redundant_no_declared_licenses(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    packages_with_declared_license = {
+        canonical_pkg_key(row.get("PkgName") or row.get("Package") or "")
+        for row in rows
+        if str(row.get("Name") or "").strip()
+        and str(row.get("Name") or "").strip() != "LicenseRef-No-Declared-License"
+    }
+    return [
+        row for row in rows
+        if not (
+            str(row.get("Name") or "").strip() == "LicenseRef-No-Declared-License"
+            and canonical_pkg_key(row.get("PkgName") or row.get("Package") or "") in packages_with_declared_license
+        )
+    ]
 
 def _vuln_only_report(data: dict[str, Any]) -> dict[str, Any]:
     copied = deepcopy(data)

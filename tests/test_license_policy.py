@@ -4,7 +4,8 @@ from autoscan.trivy_runner import _dedupe_license_report
 
 def test_classify_known_license_refs():
     assert classify_license("LicenseRef-Public-Domain") == ("LOW", "permissive")
-    assert classify_license("LicenseRef-CDDL-GPLv2-CE") == ("MEDIUM", "reciprocal")
+    assert classify_license("LicenseRef-CDDL-GPLv2-CE") == ("HIGH", "restricted")
+    assert classify_license("LicenseRef-GPL-2-0-only-WITH-classpath-exception") == ("HIGH", "restricted")
     assert classify_license("LicenseRef-Oracle-FUTC") == ("HIGH", "restricted")
 
 
@@ -55,3 +56,28 @@ def test_trivy_license_report_applies_policy_and_filters_manifests():
     assert "pubspec.lock" not in by_package
     assert by_package["io.swagger.parser.v3/swagger-parser-v3"]["Name"] == "Apache-2.0"
     assert by_package["aopalliance:aopalliance"]["Severity"] == "LOW"
+
+
+def test_trivy_license_report_drops_no_declared_when_real_license_exists():
+    data = {
+        "Results": [{
+            "Target": "SBOM.cdx-fix.json",
+            "Licenses": [
+                {"PkgName": "async", "Name": "BSD-3-Clause", "Severity": "LOW"},
+                {"PkgName": "async", "Name": "LicenseRef-No-Declared-License", "Severity": "UNKNOWN"},
+                {"PkgName": "boolean_selector", "Name": "BSD-3-Clause", "Severity": "LOW"},
+                {"PkgName": "boolean_selector", "Name": "LicenseRef-No-Declared-License", "Severity": "UNKNOWN"},
+            ],
+        }],
+    }
+
+    report, _ = _dedupe_license_report(data)
+    rows = report["Results"][0]["Licenses"]
+    licenses_by_package = {}
+    for row in rows:
+        licenses_by_package.setdefault(row["PkgName"], set()).add(row["Name"])
+
+    assert licenses_by_package == {
+        "async": {"BSD-3-Clause"},
+        "boolean_selector": {"BSD-3-Clause"},
+    }

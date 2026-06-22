@@ -14,7 +14,7 @@ MANIFEST_PACKAGE_NAMES = {
 
 LICENSE_REF_CLASSIFICATION = {
     "LicenseRef-Public-Domain": ("LOW", "permissive"),
-    "LicenseRef-CDDL-GPLv2-CE": ("MEDIUM", "reciprocal"),
+    "LicenseRef-CDDL-GPLv2-CE": ("HIGH", "restricted"),
     "LicenseRef-Oracle-FUTC": ("HIGH", "restricted"),
     "LicenseRef-Oracle-OTN": ("HIGH", "restricted"),
 }
@@ -73,7 +73,9 @@ def classify_license_ref(name: str) -> tuple[str, str] | None:
     upper = normalized.upper()
     if "ORACLE" in upper or "OTN" in upper:
         return "HIGH", "restricted"
-    if "CDDL" in upper or "GPLV2-CE" in upper or "CLASSPATH" in upper:
+    if "GPL" in upper or "CLASSPATH" in upper:
+        return "HIGH", "restricted"
+    if "CDDL" in upper:
         return "MEDIUM", "reciprocal"
     if "PUBLIC-DOMAIN" in upper or "PUBLIC_DOMAIN" in upper:
         return "LOW", "permissive"

@@ -130,6 +130,8 @@ def licenses_from_sbom(sbom_path: Path) -> list[dict[str, str]]:
             names = [override or "LicenseRef-No-Declared-License"]
         elif override and all(name == "LicenseRef-No-Declared-License" or name.startswith("LicenseRef-Unknown") for name in names):
             names = [override]
+        elif any(name != "LicenseRef-No-Declared-License" for name in names):
+            names = [name for name in names if name != "LicenseRef-No-Declared-License"]
 
         for name in dict.fromkeys(names):
             severity, _ = classify_license(name)
