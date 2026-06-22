@@ -209,7 +209,7 @@ Với **mỗi** project / service:
    - `trivy sbom --scanners vuln,license --format json` → `report.json`.
    - Từ `report.json` tách ra `license.json`, `license.txt`, `vuln.json`.
    - Cách này giữ nguyên output như cũ nhưng giảm số lần gọi Trivy trên mỗi service.
-9. **Đối chiếu license** trong `SBOM.cdx-fix.json` với `report.json` / `license.json`; nếu Trivy trả thiếu license của package, công cụ tự bổ sung từ SBOM. Component không khai báo license sẽ hiện `LicenseRef-No-Declared-License` để không bị "mất im lặng".
+9. **Đối chiếu license** trong `SBOM.cdx-fix.json` với `report.json` / `license.json`; nếu Trivy trả thiếu license của package, công cụ tự bổ sung từ SBOM. Component không khai báo license sẽ hiện `LicenseRef-No-Declared-License` để không bị "mất im lặng". Một số package phổ biến có metadata thiếu/không chuẩn được xử lý qua policy nội bộ (`license_policy.py`) như Flutter SDK (`BSD-3-Clause`), Swagger parser (`Apache-2.0`), QueryDSL (`Apache-2.0`), `xtend` (`MIT`), Java EE CDDL/GPLv2 CE, Oracle JDBC (`LicenseRef-Oracle-FUTC`). File manifest như `pom.xml`, `pubspec.lock` không được đưa vào license package report.
 10. **Sinh báo cáo HTML** cho từng service:
    - `report.html`
    - `report-vuln.html`
@@ -261,6 +261,7 @@ auto-scan-vuln-lic/
 │   ├── flutter_license_enricher.py # Bổ sung license Flutter từ `pubspec.lock` / pub.dev trước normalize
 │   ├── license_inventory.py    # Bù license từ SBOM vào report nếu Trivy không trả đủ dòng license
 │   ├── license_normalizer.py   # Chuẩn hóa license SBOM về SPDX / LicenseRef
+│   ├── license_policy.py       # Policy override/classify license thiếu metadata hoặc LicenseRef nội bộ
 │   ├── license_rules.py        # Bộ rule normalize license từ tên vendor / free-text về SPDX ID
 │   ├── maven_prebuild.py       # Prebuild / install lib Maven nội bộ trước khi quét
 │   ├── models.py               # Dataclass: Project, CommandRecord, ScanResult

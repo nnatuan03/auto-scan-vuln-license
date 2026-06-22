@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .license_inventory import augment_report_with_sbom_licenses
+from .license_policy import classify_license_ref, is_manifest_package_name, package_license_override
 from .models import CommandRecord
 from .package_names import annotate_report_package_names, canonical_pkg_key
 from .utils import load_json, run_command, tool_exists, write_json
@@ -53,8 +54,16 @@ def _dedupe_license_report(data: dict[str, Any]) -> tuple[dict[str, Any], dict[s
                 continue
             raw_count += 1
             package = str(item.get("PkgName") or item.get("Package") or "").strip()
+            if is_manifest_package_name(package):
+                continue
             license_name = str(item.get("Name") or "").strip()
+            override = package_license_override(package)
+            if override and (not license_name or license_name == "LicenseRef-No-Declared-License" or license_name.startswith("LicenseRef-Unknown")):
+                license_name = override
             severity = str(item.get("Severity") or "UNKNOWN").strip() or "UNKNOWN"
+            ref_classification = classify_license_ref(license_name)
+            if ref_classification:
+                severity = ref_classification[0]
             key = (canonical_pkg_key(package) or package, license_name, severity)
             grouped_item = grouped.setdefault(key, {
                 **item,

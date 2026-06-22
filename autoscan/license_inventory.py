@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .license_policy import classify_license_ref, is_manifest_package_name, package_license_override
 from .package_names import UNKNOWN_PACKAGE, resolve_package_name
 
 
@@ -93,6 +94,9 @@ def classify_license(name: str) -> tuple[str, str]:
     if not normalized or normalized == "LicenseRef-No-Declared-License":
         return "UNKNOWN", "unknown"
     if normalized.startswith("LicenseRef-"):
+        ref_classification = classify_license_ref(normalized)
+        if ref_classification:
+            return ref_classification
         return "UNKNOWN", "unknown"
     if normalized in RESTRICTED or any(token in upper for token in ("AGPL", "GPL", "SSPL")):
         return "HIGH", "restricted"
@@ -114,13 +118,18 @@ def licenses_from_sbom(sbom_path: Path) -> list[dict[str, str]]:
         if not isinstance(component, dict):
             continue
         package = _component_name(component)
+        if is_manifest_package_name(package):
+            continue
         target = _component_target(component)
         licenses = component.get("licenses") or []
 
         names = [_license_name(entry) for entry in licenses if isinstance(entry, dict)]
         names = [name for name in names if name]
+        override = package_license_override(package)
         if not names:
-            names = ["LicenseRef-No-Declared-License"]
+            names = [override or "LicenseRef-No-Declared-License"]
+        elif override and all(name == "LicenseRef-No-Declared-License" or name.startswith("LicenseRef-Unknown") for name in names):
+            names = [override]
 
         for name in dict.fromkeys(names):
             severity, _ = classify_license(name)

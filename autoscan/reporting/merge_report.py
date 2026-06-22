@@ -15,6 +15,7 @@ from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
 
+from autoscan.license_policy import is_manifest_package_name
 from autoscan.package_names import canonical_pkg_key, resolve_package_name
 
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
@@ -134,6 +135,8 @@ def load_all_reports(be_dir):
                     result_target=result_target,
                     result_class=result_class,
                 ).name
+                if is_manifest_package_name(pkg_name):
+                    continue
 
                 lic_rows.append({
                     "folder":   folder_name,

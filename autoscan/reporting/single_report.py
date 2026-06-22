@@ -5,6 +5,7 @@ from pathlib import Path
 from collections import defaultdict
 from datetime import datetime
 
+from autoscan.license_policy import is_manifest_package_name
 from autoscan.package_names import canonical_pkg_key, resolve_package_name
 
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
@@ -268,6 +269,8 @@ def generate_html(report_path="report.json", output_path="report.html"):
                 result_target=target,
                 result_class=result_class,
             ).name
+            if is_manifest_package_name(pkg_name):
+                continue
             license_rows.append({
                 "target": target,
                 "folder": target,
