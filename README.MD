@@ -43,6 +43,7 @@ python autoscan.py "D:/Projects"
 ### Ý nghĩa tham số `Path`
 
 - Nếu `Path` trỏ tới **một project** (có `pom.xml`, `package.json`, `pubspec.yaml`, …) — công cụ quét một project.
+- Nếu `Path` trỏ tới **một file đơn lẻ** (`requirements.txt`, lockfile, IaC file, …) — công cụ quét file đó bằng Trivy filesystem target.
 - Nếu `Path` trỏ tới **thư mục cha** chứa nhiều service ở cấp 1 — công cụ tự phát hiện từng service, quét song song rồi gộp báo cáo.
 - Những thư mục cấp 1 **không có marker** nhận dạng vẫn được quét bằng `trivy fs` với `kind = unknown` để tránh bỏ sót.
 
@@ -61,6 +62,8 @@ Trong quá trình quét, terminal sẽ in log realtime cho **mỗi lệnh ngoài
 ```text
 [RUN] trivy sbom --scanners vuln,license --format json ...
 [OK ] exit=0 time=1.24s trivy sbom --scanners vuln,license --format json ...
+[RUN] trivy fs --scanners vuln,license,secret,misconfig --license-full --format json ...
+[OK ] exit=0 time=2.40s trivy fs --scanners vuln,license,secret,misconfig --license-full --format json ...
 [FAIL] exit=1 time=0.42s gradle cyclonedxBom
 ```
 
@@ -119,7 +122,7 @@ Có thể tắt dashboard bằng `--no-dashboard` (CLI) hoặc `-NoDashboard` (P
 | Thành phần | Phiên bản tối thiểu | Ghi chú |
 | --- | --- | --- |
 | **Python** | **3.10+** | Công cụ dùng cú pháp `PEP 604` (`list[str] \| None`, `X \| Y`). |
-| **Trivy** | mới nhất | Phải có sẵn trong `PATH`. |
+| **Trivy** | mới nhất | Phải có sẵn trong `PATH`, hoặc dùng `--install-missing` để công cụ tự cài nếu có `brew` / `winget` / `apt-get`. |
 | **PowerShell** | 5.1+ (Windows) | Chỉ cần khi dùng wrapper `run_scan.ps1`. |
 
 ### Khuyến nghị — để SBOM chính xác hơn theo từng hệ sinh thái
@@ -164,10 +167,18 @@ pip install -r requirements.txt
 | **Node.js** | `package.json`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `bun.lockb` |
 | **Flutter** | `pubspec.yaml` |
 | **.NET** | `.sln`, `.csproj` |
-| **Python** | `requirements.txt`, `pyproject.toml`, `Pipfile`, `poetry.lock` |
-| **Go** | `go.mod` |
+| **Python** | `requirements.txt`, `requirements.lock`, `pyproject.toml`, `Pipfile`, `Pipfile.lock`, `poetry.lock`, `uv.lock`, `conda-lock.yml` |
+| **Go** | `go.mod`, `go.sum` |
+| **Rust** | `Cargo.toml`, `Cargo.lock` |
 | **PHP** | `composer.json`, `composer.lock` |
 | **Ruby** | `Gemfile`, `Gemfile.lock` |
+| **Swift** | `Package.swift`, `Package.resolved` |
+| **CocoaPods** | `Podfile`, `Podfile.lock` |
+| **Elixir / Erlang** | `mix.exs`, `mix.lock`, `rebar.config`, `rebar.lock` |
+| **Java archives / SBT** | `*.jar`, `*.war`, `*.ear`, `*.par`, `sbt.lock` |
+| **Conda / Julia / R / C/C++** | `environment.yml`, `conda-lock.yml`, `Project.toml`, `Manifest.toml`, `renv.lock`, `pak.lock`, `conan.lock`, `vcpkg.json` |
+| **IaC / config** | `Dockerfile`, `Containerfile`, `docker-compose.yml`, `Chart.yaml`, `Chart.lock`, `kustomization.yaml`, `main.tf`, `.terraform.lock.hcl`, `serverless.yml` |
+| **Single file** | File được truyền trực tiếp qua CLI — quét bằng `trivy fs <file>` |
 | **Unknown** | Thư mục cấp 1 không có marker — fallback `trivy fs` |
 
 Nếu không có generator riêng hoặc generator bị lỗi, công cụ **luôn fallback** về:
@@ -184,12 +195,16 @@ Với **mỗi** project / service:
 
 1. **Phát hiện loại mã nguồn** dựa trên marker.
 2. **Luôn sinh SBOM mới** cho lần quét hiện tại — *không tái sử dụng* SBOM có sẵn trong mã nguồn để tránh kết quả cũ khi quét lại.
-3. **Prebuild Maven lib nội bộ** (nếu thư mục quét có nhiều Maven project tham chiếu lẫn nhau):
+3. **Chuẩn bị dependency metadata nếu được bật**:
+   - `--prepare-deps`: hỏi trước khi chạy lệnh chuẩn bị metadata thiếu.
+   - `--prepare-deps-auto`: tự chạy trong môi trường đã tin cậy / sandbox.
+   - Hiện hỗ trợ Flutter: nếu có `pubspec.yaml` nhưng thiếu `pubspec.lock`, chạy `flutter pub get` trước khi scan.
+4. **Prebuild Maven lib nội bộ** (nếu thư mục quét có nhiều Maven project tham chiếu lẫn nhau):
    - Đọc tất cả `pom.xml`, tìm các Maven project được tham chiếu bởi project khác trong cùng thư mục nguồn.
    - Chạy `mvn clean install -DskipTests -Dmaven.test.skip=true -DskipITs` cho các lib / parent nội bộ trước khi quét.
    - Mục tiêu: đảm bảo local `.m2` có đủ cả `.jar` lẫn `.pom`, tránh trường hợp service quét ra dependency version cũ vì thiếu metadata lib nội bộ.
    - Có thể bỏ qua bước này để debug nhanh: `--skip-maven-prebuild` (CLI) hoặc `-SkipMavenPrebuild` (PowerShell).
-4. **Sinh SBOM theo ecosystem** nếu có công cụ phù hợp:
+5. **Sinh SBOM theo ecosystem** nếu có công cụ phù hợp:
 
    | Ecosystem | Lệnh ưu tiên | Ghi chú |
    | --- | --- | --- |
@@ -202,19 +217,28 @@ Với **mỗi** project / service:
    | Python / Go / PHP / Ruby / unknown | fallback `trivy fs` | |
 
    Nếu generator riêng fail hoặc không sinh ra SBOM mới → fallback `trivy fs --format cyclonedx`.
-5. **Reconcile phiên bản** trong SBOM với phiên bản mới nhất tìm được trong mã nguồn / lock file hiện có. Ví dụ: Node có cả `package-lock.json` và `yarn.lock`, nếu SBOM ra `1.80.0` nhưng `package.json` / `yarn.lock` đang ở `1.84.0` — công cụ sẽ cập nhật SBOM lên `1.84.0` trước khi scan. Công cụ **không tự truy vấn registry** để nâng cấp dependency ngoài mã nguồn.
-6. **Enrich license Flutter** nếu service có `pubspec.lock`: đọc package/version hosted từ lock file, tra cứu best-effort trên pub.dev, ghi `pub-license-enrich.log` và cache `pub-license-cache.json`; package không đủ bằng chứng vẫn giữ `LicenseRef-No-Declared-License`.
-7. **Chuẩn hóa license** thành `SBOM.cdx-fix.json`.
-8. **Chạy Trivy một lần duy nhất** cho mỗi service:
+6. **Reconcile phiên bản** trong SBOM với phiên bản mới nhất tìm được trong mã nguồn / lock file hiện có. Ví dụ: Node có cả `package-lock.json` và `yarn.lock`, nếu SBOM ra `1.80.0` nhưng `package.json` / `yarn.lock` đang ở `1.84.0` — công cụ sẽ cập nhật SBOM lên `1.84.0` trước khi scan. Công cụ **không tự truy vấn registry** để nâng cấp dependency ngoài mã nguồn.
+7. **Enrich license Flutter** nếu service có `pubspec.lock`: đọc package/version hosted từ lock file, tra cứu best-effort trên pub.dev, ghi `pub-license-enrich.log` và cache `pub-license-cache.json`; package không đủ bằng chứng vẫn giữ `LicenseRef-No-Declared-License`.
+8. **Chuẩn hóa license** thành `SBOM.cdx-fix.json`.
+9. **Chạy full source scan** cho mỗi service / file:
+   - `trivy fs --scanners vuln,license,secret,misconfig --license-full --format json` → `filesystem-report.json`.
+   - Đây là bước bắt buộc để không bỏ sót secret, misconfiguration/IaC và các ecosystem mà SBOM generator riêng không bao phủ đủ.
+   - Nếu bước này fail, service bị đánh dấu `FAIL` thay vì báo OK giả.
+10. **Chạy Trivy trên SBOM đã chuẩn hóa** cho dependency/license report tương thích báo cáo cũ:
    - `trivy sbom --scanners vuln,license --format json` → `report.json`.
    - Từ `report.json` tách ra `license.json`, `license.txt`, `vuln.json`.
-   - Cách này giữ nguyên output như cũ nhưng giảm số lần gọi Trivy trên mỗi service.
-9. **Đối chiếu license** trong `SBOM.cdx-fix.json` với `report.json` / `license.json`; nếu Trivy trả thiếu license của package, công cụ tự bổ sung từ SBOM. Component không khai báo license sẽ hiện `LicenseRef-No-Declared-License` để không bị "mất im lặng". Một số package phổ biến có metadata thiếu/không chuẩn được xử lý qua policy nội bộ (`license_policy.py`) như Flutter SDK (`BSD-3-Clause`), Swagger parser (`Apache-2.0`), QueryDSL (`Apache-2.0`), `xtend` (`MIT`), Java EE CDDL/GPLv2 CE, Oracle JDBC (`LicenseRef-Oracle-FUTC`). File manifest như `pom.xml`, `pubspec.lock` không được đưa vào license package report.
-10. **Sinh báo cáo HTML** cho từng service:
+11. **Đối chiếu license** trong `SBOM.cdx-fix.json` với `report.json` / `license.json`; nếu Trivy trả thiếu license của package, công cụ tự bổ sung từ SBOM. Component không khai báo license sẽ hiện `LicenseRef-No-Declared-License` để không bị "mất im lặng". Một số package phổ biến có metadata thiếu/không chuẩn được xử lý qua policy nội bộ (`license_policy.py`) như Flutter SDK (`BSD-3-Clause`), Swagger parser (`Apache-2.0`), QueryDSL (`Apache-2.0`), `xtend` (`MIT`), Java EE CDDL/GPLv2 CE, Oracle JDBC (`LicenseRef-Oracle-FUTC`). File manifest như `pom.xml`, `pubspec.lock` không được đưa vào license package report.
+12. **Sinh báo cáo HTML** cho từng service:
    - `report.html`
    - `report-vuln.html`
-11. **Merge tất cả service** thành `consolidated-report.html`.
-11. **Sinh debug report** `debug-report.md` / `debug-report.json` để đối chiếu với tài liệu và debug từng service.
+
+### Lưu ý về độ đầy đủ
+
+- Trivy có thể cần lockfile, cache, vendor directory hoặc package manager metadata để xác định đủ dependency/license cho một số ecosystem.
+- Công cụ luôn chạy full filesystem scan và license full mode. Các lệnh có thể tạo metadata từ source lạ chỉ chạy khi bật `--prepare-deps` / `--prepare-deps-auto`.
+- Nếu source bị thiếu file sinh ra từ dependency resolution (`node_modules`, cache package manager, `project.assets.json`, lockfile, vendor metadata, …), hãy pull/restore artifact hoặc bật prepare-deps trong môi trường sandbox trước khi scan lại.
+13. **Merge tất cả service** thành `consolidated-report.html`.
+14. **Sinh debug report** `debug-report.md` / `debug-report.json` để đối chiếu với tài liệu và debug từng service.
 
 ---
 
@@ -257,7 +281,8 @@ auto-scan-vuln-lic/
 │   ├── config.py               # Hằng số cấu hình, marker hệ sinh thái, ignore-dir
 │   ├── debug_report.py         # Sinh debug report đối chiếu tài liệu, marker, command, count SBOM / license
 │   ├── dependency_health.py    # Phát hiện lock file thiếu / cũ và mismatch manifest ↔ lock trước khi sinh SBOM
-│   ├── detector.py             # Tự phát hiện Maven, Gradle, Node, Flutter, .NET, Python, Go, PHP, Ruby
+│   ├── dependency_preparer.py  # Chuẩn bị dependency metadata thiếu khi bật `--prepare-deps` / `--prepare-deps-auto`
+│   ├── detector.py             # Tự phát hiện Maven, Gradle, Node, Flutter, .NET, Python, Go, Rust, IaC, ...
 │   ├── flutter_license_enricher.py # Bổ sung license Flutter từ `pubspec.lock` / pub.dev trước normalize
 │   ├── license_inventory.py    # Bù license từ SBOM vào report nếu Trivy không trả đủ dòng license
 │   ├── license_normalizer.py   # Chuẩn hóa license SBOM về SPDX / LicenseRef
@@ -271,6 +296,7 @@ auto-scan-vuln-lic/
 │   ├── scanner.py              # Quét một project / service
 │   ├── terminal.py             # In command, status, màu terminal / PowerShell
 │   ├── trivy_runner.py         # Chạy Trivy và sinh output JSON / TXT
+│   ├── tool_installer.py       # Hỏi / tự cài tool scan thiếu (`trivy`, `flutter`, `maven`, ...)
 │   ├── utils.py                # Tiện ích chung: subprocess, JSON, ensure_dir, copy_file
 │   ├── version_reconciler.py   # Đối chiếu version SBOM với lock file / manifest hiện tại
 │   └── reporting/
@@ -280,7 +306,10 @@ auto-scan-vuln-lic/
 │       └── single_report.py    # Engine sinh report HTML cho từng service
 │
 └── tests/
-    └── ecosystem_matrix.py     # Tạo fixture nhiều ecosystem để test detect / dependency-health / report recovery
+    ├── ecosystem_matrix.py     # Tạo fixture nhiều ecosystem để test detect / dependency-health / report recovery
+    ├── test_dependency_preparer.py
+    ├── test_tool_installer.py
+    └── test_trivy_full_scan.py
 ```
 
 ---
@@ -419,7 +448,7 @@ Chạy test fixture local, **không cần cài** Maven / Gradle / Flutter / PHP 
 python tests/ecosystem_matrix.py
 ```
 
-Test tự sinh mã nguồn mẫu cho **Maven, Gradle, Node, Flutter, .NET, Python, Go, PHP, Ruby** và cả `unknown source`. Nó verify các case:
+Test tự sinh mã nguồn mẫu cho **Maven, Gradle, Node, Flutter, .NET, Python, Go, PHP, Ruby** và cả `unknown source`. Bộ `pytest` bổ sung kiểm tra full Trivy scan, marker mở rộng, cài tool thiếu và prepare-deps. Các case chính:
 
 - Lock file OK.
 - Lock file thiếu.
@@ -444,6 +473,9 @@ python autoscan.py "D:/Projects" --recursive-depth 4
 # Bỏ qua generator riêng, chỉ dùng trivy fs
 python autoscan.py "D:/Projects" --trivy-only
 
+# Quét một file đơn lẻ
+python autoscan.py "D:/Projects/app/requirements.txt"
+
 # Chỉ detect, không chạy Trivy / tool ngoài
 python autoscan.py "D:/Projects" --dry-run
 
@@ -455,6 +487,18 @@ python autoscan.py "D:/Projects" --hide-commands --no-color
 
 # Đổi folder output
 python autoscan.py "D:/Projects" --output "D:/Audit/scan-results"
+
+# Tự cài tool scan còn thiếu bằng package manager hỗ trợ rồi scan
+python autoscan.py "D:/Projects" --install-missing
+
+# Không hỏi cài tool thiếu, chỉ báo lỗi/cảnh báo
+python autoscan.py "D:/Projects" --no-install-prompt
+
+# Hỏi trước khi chạy lệnh chuẩn bị dependency metadata bị thiếu
+python autoscan.py "D:/Projects" --prepare-deps
+
+# Tự chạy lệnh chuẩn bị dependency metadata bị thiếu
+python autoscan.py "D:/Projects" --prepare-deps-auto
 ```
 
 ### Bảng tùy chọn
@@ -470,6 +514,26 @@ python autoscan.py "D:/Projects" --output "D:/Audit/scan-results"
 | `--no-dashboard` | Tắt dashboard tiến độ trong terminal. |
 | `--hide-commands` | Không in từng command ra terminal. |
 | `--no-color` | Tắt màu terminal. |
+| `--install-missing` | Tự cài tool scan còn thiếu nếu có package manager hỗ trợ (`brew`, `winget`, `apt-get`), sau đó scan lại. |
+| `--no-install-prompt` | Không hỏi cài tool thiếu; ghi cảnh báo/lỗi để người dùng tự cài. |
+| `--prepare-deps` | Hỏi trước khi chạy lệnh chuẩn bị dependency metadata còn thiếu trước scan. Hiện hỗ trợ Flutter `pubspec.lock` bằng `flutter pub get`. |
+| `--prepare-deps-auto` | Tự chạy lệnh chuẩn bị dependency metadata còn thiếu trước scan, phù hợp khi đã chạy trong sandbox/CI có kiểm soát. |
+
+### Cài tool thiếu và scan lại
+
+- Trước khi scan, công cụ kiểm tra các tool cần thiết/khuyến nghị như `trivy`, `maven`, `gradle`, `node`, `dotnet`, `flutter` theo loại project phát hiện được.
+- Nếu thiếu tool và terminal đang tương tác, công cụ hỏi có muốn cài ngay không; nếu đồng ý sẽ dùng package manager hỗ trợ rồi tiếp tục scan.
+- Nếu scan vẫn fail vì tool bị thiếu, công cụ hỏi cài tool đó và **scan lại một lần** sau khi cài thành công.
+- Với CI/non-interactive, dùng `--install-missing` để tự cài hoặc `--no-install-prompt` để chỉ báo lỗi.
+- Công cụ chỉ cài **tool phục vụ scan**. Nếu muốn tự tạo lock/metadata bị thiếu, bật riêng `--prepare-deps` hoặc `--prepare-deps-auto`.
+
+### Chuẩn bị dependency metadata bị thiếu
+
+- `--prepare-deps` chạy trước scan và hỏi xác nhận khi phát hiện source thiếu metadata quan trọng.
+- Hiện hỗ trợ Flutter: nếu có `pubspec.yaml` nhưng thiếu `pubspec.lock`, công cụ chạy `flutter pub get` để tạo lockfile rồi mới scan.
+- Nếu lệnh chuẩn bị fail do constraint cũ, lỗi được ghi vào `dependency-prepare.log`, `scan-summary.json` và scan vẫn fallback bằng Trivy trên source hiện có.
+- `--prepare-deps-auto` bỏ qua bước hỏi, chỉ nên dùng khi source đã tin cậy hoặc chạy trong sandbox.
+- Các ecosystem khác như Node/Python/PHP/Ruby/.NET/Go nên được bổ sung từng bước với mode an toàn riêng để tránh chạy lifecycle script không mong muốn.
 
 ### PowerShell wrapper — option tương ứng
 
@@ -480,6 +544,10 @@ python autoscan.py "D:/Projects" --output "D:/Audit/scan-results"
 .\run_scan.ps1 -Path "D:\Projects" -DryRun
 .\run_scan.ps1 -Path "D:\Projects" -NoDashboard
 .\run_scan.ps1 -Path "D:\Projects" -HideCommands -NoColor
+.\run_scan.ps1 -Path "D:\Projects" -InstallMissing
+.\run_scan.ps1 -Path "D:\Projects" -NoInstallPrompt
+.\run_scan.ps1 -Path "D:\Projects" -PrepareDeps
+.\run_scan.ps1 -Path "D:\Projects" -PrepareDepsAuto
 ```
 
 ---

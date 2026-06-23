@@ -52,7 +52,8 @@ def _run_trivy_fs(project: Project, output_sbom: Path, log_file: Path) -> tuple[
     if not tool_exists("trivy"):
         raise SbomGenerationError("trivy not found in PATH")
     command = ["trivy", "fs", "--format", "cyclonedx", "--output", str(output_sbom), str(project.path)]
-    record, _, _ = run_command(command, cwd=project.path, log_file=log_file)
+    cwd = project.path if project.path.is_dir() else project.path.parent
+    record, _, _ = run_command(command, cwd=cwd, log_file=log_file)
     if record.returncode != 0 or not output_sbom.is_file():
         raise SbomGenerationError("trivy fs failed to generate SBOM")
     return output_sbom, "generated-trivy-fs", [record]
@@ -276,16 +277,6 @@ def _run_dotnet(project: Project, output_sbom: Path, log_file: Path) -> tuple[Pa
     return None, records
 
 
-def _prepare_flutter(project: Project, log_file: Path) -> list[CommandRecord]:
-    if (project.path / "pubspec.lock").is_file():
-        return []
-    flutter = first_existing_tool(("flutter", "flutter.bat"))
-    if not flutter:
-        return []
-    record, _, _ = run_command([flutter, "pub", "get"], cwd=project.path, log_file=log_file)
-    return [record]
-
-
 def generate_sbom(project: Project, output_dir: Path, log_file: Path, trivy_only: bool = False) -> tuple[Path, str, list[CommandRecord]]:
     ensure_dir(output_dir)
     output_sbom = output_dir / "SBOM.cdx.json"
@@ -313,9 +304,6 @@ def generate_sbom(project: Project, output_dir: Path, log_file: Path, trivy_only
             records.extend(cmd_records)
             if generated:
                 return generated, "generated-dotnet-cyclonedx", records
-        elif project.kind == "flutter":
-            records.extend(_prepare_flutter(project, log_file))
-
     sbom, status, trivy_records = _run_trivy_fs(project, output_sbom, log_file)
     records.extend(trivy_records)
     return sbom, status, records

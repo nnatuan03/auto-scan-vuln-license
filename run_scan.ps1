@@ -8,7 +8,11 @@ param(
     [switch]$DryRun,
     [switch]$NoDashboard,
     [switch]$HideCommands,
-    [switch]$NoColor
+    [switch]$NoColor,
+    [switch]$InstallMissing,
+    [switch]$NoInstallPrompt,
+    [switch]$PrepareDeps,
+    [switch]$PrepareDepsAuto
 )
 
 $ErrorActionPreference = "Stop"
@@ -56,6 +60,18 @@ if ($HideCommands) {
 }
 if ($NoColor) {
     $argsList += "--no-color"
+}
+if ($InstallMissing) {
+    $argsList += "--install-missing"
+}
+if ($NoInstallPrompt) {
+    $argsList += "--no-install-prompt"
+}
+if ($PrepareDeps) {
+    $argsList += "--prepare-deps"
+}
+if ($PrepareDepsAuto) {
+    $argsList += "--prepare-deps-auto"
 }
 
 & $pythonCmd.Source @argsList

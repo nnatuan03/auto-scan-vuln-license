@@ -8,7 +8,7 @@ from .license_inventory import augment_report_with_sbom_licenses
 from .license_policy import classify_license_ref, is_manifest_package_name, package_license_override
 from .models import CommandRecord
 from .package_names import annotate_report_package_names, canonical_pkg_key
-from .utils import load_json, run_command, tool_exists, write_json
+from .utils import ensure_dir, load_json, run_command, tool_exists, write_json
 
 
 class TrivyScanError(RuntimeError):
@@ -20,6 +20,45 @@ def _run_trivy(command: list[str], cwd: Path, log_file: Path, output_file: Path)
     if record.returncode != 0 or not output_file.is_file():
         raise TrivyScanError(f"Trivy command failed: {' '.join(command)}")
     return record
+
+
+def _target_cwd(target_path: Path) -> Path:
+    return target_path if target_path.is_dir() else target_path.parent
+
+
+def _count_comprehensive_findings(data: dict[str, Any]) -> dict[str, int]:
+    counts = {
+        "vulnerabilities": 0,
+        "licenses": 0,
+        "misconfigurations": 0,
+        "secrets": 0,
+    }
+    for result in data.get("Results") or []:
+        if not isinstance(result, dict):
+            continue
+        counts["vulnerabilities"] += len(result.get("Vulnerabilities") or [])
+        counts["licenses"] += len(result.get("Licenses") or [])
+        counts["misconfigurations"] += len(result.get("Misconfigurations") or [])
+        counts["secrets"] += len(result.get("Secrets") or [])
+    return counts
+
+
+def scan_filesystem_target(target_path: Path, output_dir: Path, log_file: Path) -> tuple[dict[str, Path], dict[str, int], list[CommandRecord]]:
+    if not tool_exists("trivy"):
+        raise TrivyScanError("trivy not found in PATH")
+
+    ensure_dir(output_dir)
+    output = output_dir / "filesystem-report.json"
+    record = _run_trivy([
+        "trivy", "fs",
+        "--scanners", "vuln,license,secret,misconfig",
+        "--license-full",
+        "--format", "json",
+        "--output", str(output),
+        str(target_path),
+    ], _target_cwd(target_path), log_file, output)
+    data = load_json(output)
+    return {"filesystem_report_json": output}, _count_comprehensive_findings(data), [record]
 
 
 def _license_only_report(data: dict[str, Any]) -> dict[str, Any]:

@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from .config import DEFAULT_RESULTS_DIR
 from .debug_report import write_debug_reports
+from .dependency_preparer import prepare_dependencies
 from .detector import discover_projects
 from .maven_prebuild import prebuild_internal_maven_projects
 from .models import Project, ScanResult
@@ -36,15 +37,21 @@ def scan_all(
     trivy_only: bool = False,
     dry_run: bool = False,
     maven_prebuild: bool = True,
+    prepare_deps: bool = False,
+    prepare_deps_auto: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> tuple[Path, list[ScanResult], Path | None]:
     root = root.resolve()
-    output_base = (output_base or (root / DEFAULT_RESULTS_DIR)).resolve()
+    default_output_parent = root if root.is_dir() else root.parent
+    output_base = (output_base or (default_output_parent / DEFAULT_RESULTS_DIR)).resolve()
     ensure_dir(output_base)
     run_dir = make_run_dir(output_base)
     services_dir = ensure_dir(run_dir / "services")
 
-    projects = discover_projects(root, recursive_depth=recursive_depth)
+    if root.is_file():
+        projects = [Project(path=root, name=root.name, kind="file", markers=[root.name])]
+    else:
+        projects = discover_projects(root, recursive_depth=recursive_depth)
     if progress_callback:
         progress_callback("start", {
             "root": root,
@@ -79,10 +86,16 @@ def scan_all(
         progress_callback("prebuild_start", {
             "projects": projects,
         })
+    dependency_prepare_results, dependency_prepare_commands = prepare_dependencies(
+        projects,
+        run_dir / "dependency-prepare.log",
+        enabled=prepare_deps and not dry_run,
+        assume_yes=prepare_deps_auto,
+    )
     maven_prebuild_summary = prebuild_internal_maven_projects(
         projects,
         run_dir,
-        enabled=maven_prebuild,
+        enabled=maven_prebuild and root.is_dir(),
         dry_run=dry_run,
         trivy_only=trivy_only,
     )
@@ -99,7 +112,7 @@ def scan_all(
         future_map = {}
         for project in projects:
             try:
-                relative_name = str(project.path.relative_to(root))
+                relative_name = str(project.path.relative_to(root if root.is_dir() else root.parent))
             except ValueError:
                 relative_name = project.name
             if relative_name == ".":
@@ -152,6 +165,8 @@ def scan_all(
         "ok": sum(1 for r in results if r.status == "OK"),
         "failed": sum(1 for r in results if r.status == "FAIL"),
         "dry_run": dry_run,
+        "dependency_prepare": [item.to_json() for item in dependency_prepare_results],
+        "dependency_prepare_commands": [command.to_json() for command in dependency_prepare_commands],
         "maven_prebuild": maven_prebuild_summary,
         "projects": [r.to_json() for r in results],
     }

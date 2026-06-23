@@ -282,14 +282,20 @@ def _service_debug(result: ScanResult) -> dict[str, Any]:
             "license_txt": str(result.license_txt) if result.license_txt else None,
             "vuln_json": str(result.vuln_json) if result.vuln_json else None,
             "vuln_html": str(result.vuln_html) if result.vuln_html else None,
+            "filesystem_report_json": str(result.filesystem_report_json) if result.filesystem_report_json else None,
             "scan_log": str(scan_log),
             "license_normalize_log": str(normalize_log),
         },
         "counts": {
             "reported_vulnerabilities": result.vuln_count,
             "reported_licenses": result.license_count,
+            "filesystem_vulnerabilities": result.filesystem_vuln_count,
+            "filesystem_licenses": result.filesystem_license_count,
+            "reported_misconfigurations": result.misconfig_count,
+            "reported_secrets": result.secret_count,
             "raw_sbom": _sbom_stats(result.sbom_path),
             "fixed_sbom": _sbom_stats(result.fixed_sbom_path),
+            "filesystem_report_json": _trivy_stats(result.filesystem_report_json),
             "report_json": _trivy_stats(result.report_json),
             "license_json": _trivy_stats(result.license_json),
             "vuln_json": _trivy_stats(result.vuln_json),
@@ -449,7 +455,7 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
         "",
     ])
     lines.extend(_markdown_table(
-        ["Service", "Kind", "Status", "SBOM", "Dependency health", "Fixed components", "Version updates", "SBOM license rows", "Trivy licenses", "Pkg name recovery", "Markers"],
+        ["Service", "Kind", "Status", "SBOM", "Dependency health", "Fixed components", "Version updates", "SBOM license rows", "SBOM Trivy licenses", "FS vulns", "FS licenses", "Misconfigs", "Secrets", "Pkg name recovery", "Markers"],
         [
             [
                 service["name"],
@@ -461,6 +467,10 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
                 (service["internal_debug"].get("version_reconcile_stats") or {}).get("updated_components", "-"),
                 service["counts"].get("license_rows_from_fixed_sbom", "-"),
                 service["counts"]["report_json"].get("licenses", "-"),
+                service["counts"].get("filesystem_vulnerabilities", "-"),
+                service["counts"].get("filesystem_licenses", "-"),
+                service["counts"].get("reported_misconfigurations", "-"),
+                service["counts"].get("reported_secrets", "-"),
                 _package_resolution_counts(service.get("package_name_resolution")),
                 ", ".join(service["markers"]) or "-",
             ]
@@ -478,6 +488,11 @@ def render_debug_markdown(data: dict[str, Any]) -> str:
             f"- Kind/markers: `{service['kind']}` / `{', '.join(service['markers']) or '-'}`",
             f"- Top-level lock/build files: `{', '.join(service['top_level_lock_or_build_files']) or '-'}`",
             f"- SBOM status: `{service['sbom_status']}`",
+            f"- Full source scan: `{service['paths'].get('filesystem_report_json') or '-'}`; "
+            f"vulnerabilities `{service['counts'].get('filesystem_vulnerabilities', '-')}`; "
+            f"licenses `{service['counts'].get('filesystem_licenses', '-')}`; "
+            f"misconfigurations `{service['counts'].get('reported_misconfigurations', '-')}`; "
+            f"secrets `{service['counts'].get('reported_secrets', '-')}`",
             f"- Scan log: `{service['paths']['scan_log']}`",
             f"- License normalize log: `{service['paths']['license_normalize_log']}`",
         ])

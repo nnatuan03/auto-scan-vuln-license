@@ -10,7 +10,7 @@ from .license_normalizer import normalize_sbom
 from .models import Project, ScanResult
 from .reporting.reports import generate_single_report
 from .sbom_generator import SbomGenerationError, generate_sbom
-from .trivy_runner import TrivyScanError, scan_sbom
+from .trivy_runner import TrivyScanError, scan_filesystem_target, scan_sbom
 from .utils import ensure_dir, load_json, write_json
 from .version_reconciler import reconcile_sbom_versions
 
@@ -91,6 +91,18 @@ def scan_project(project: Project | Path, output_dir: Path, trivy_only: bool = F
         result.debug["license_normalize_stats"] = normalize_stats
         result.debug["fixed_sbom_path"] = str(fixed_sbom)
 
+        fs_outputs, fs_counts, fs_commands = scan_filesystem_target(project.path, output_dir, log_file)
+        result.commands.extend(fs_commands)
+        result.filesystem_report_json = fs_outputs["filesystem_report_json"]
+        result.debug["filesystem_scan"] = {
+            "target": str(project.path),
+            "scanners": ["vuln", "license", "secret", "misconfig"],
+            "outputs": {key: str(path) for key, path in fs_outputs.items()},
+            "counts": fs_counts,
+        }
+        result.filesystem_vuln_count = fs_counts["vulnerabilities"]
+        result.filesystem_license_count = fs_counts["licenses"]
+
         outputs, vuln_count, license_count, trivy_commands, package_name_stats = scan_sbom(fixed_sbom, output_dir, log_file)
         result.commands.extend(trivy_commands)
         result.report_json = outputs["report_json"]
@@ -99,6 +111,8 @@ def scan_project(project: Project | Path, output_dir: Path, trivy_only: bool = F
         result.vuln_json = outputs["vuln_json"]
         result.vuln_count = vuln_count
         result.license_count = license_count
+        result.misconfig_count = fs_counts["misconfigurations"]
+        result.secret_count = fs_counts["secrets"]
         result.debug["trivy_outputs"] = {key: str(path) for key, path in outputs.items()}
         result.debug["package_name_resolution"] = package_name_stats
         _attach_autoscan_metadata(

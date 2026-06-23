@@ -48,8 +48,13 @@ class ScanResult:
     license_txt: Path | None = None
     vuln_json: Path | None = None
     vuln_html: Path | None = None
+    filesystem_report_json: Path | None = None
     vuln_count: int = 0
     license_count: int = 0
+    filesystem_vuln_count: int = 0
+    filesystem_license_count: int = 0
+    misconfig_count: int = 0
+    secret_count: int = 0
     elapsed_seconds: float = 0.0
     notes: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -69,6 +74,7 @@ class ScanResult:
             "license_txt",
             "vuln_json",
             "vuln_html",
+            "filesystem_report_json",
         ):
             data[key] = str(data[key]) if data[key] else None
         data["commands"] = [

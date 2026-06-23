@@ -20,6 +20,10 @@ def _has_suffix_marker(path: Path, suffix: str) -> list[str]:
     return [p.name for p in path.iterdir() if p.is_file() and p.name.endswith(suffix)]
 
 
+def _has_glob_marker(path: Path, pattern: str) -> list[str]:
+    return [p.name for p in path.glob(pattern) if p.is_file()]
+
+
 def detect_project(path: Path) -> Project | None:
     path = path.resolve()
     if not path.is_dir():
@@ -29,7 +33,9 @@ def detect_project(path: Path) -> Project | None:
     for kind, markers in PROJECT_MARKERS.items():
         found: list[str] = []
         for marker in markers:
-            if marker.startswith("."):
+            if "*" in marker:
+                found.extend(_has_glob_marker(path, marker))
+            elif marker.startswith("."):
                 found.extend(_has_suffix_marker(path, marker))
             elif (path / marker).exists():
                 found.append(marker)
@@ -39,7 +45,10 @@ def detect_project(path: Path) -> Project | None:
     if not matches:
         return None
 
-    priority = ("maven", "gradle", "dotnet", "flutter", "node", "python", "go", "php", "ruby")
+    priority = (
+        "maven", "gradle", "dotnet", "flutter", "node", "python", "go",
+        "rust", "php", "ruby", "swift", "cocoapods", "elixir", "erlang", "java", "conda", "julia", "r", "cpp", "iac",
+    )
     ranked = sorted(matches, key=lambda item: priority.index(item[0]) if item[0] in priority else 99)
     kind, markers = ranked[0]
     return Project(path=path, name=path.name, kind=kind, markers=sorted(set(markers)))
