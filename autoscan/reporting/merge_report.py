@@ -1317,6 +1317,19 @@ function joinLines(values) {
   return (list.length ? list : ['-']).join('\\n');
 }
 
+const EXCEL_CELL_LIMIT = 32767;
+const EXCEL_CELL_SAFE_LIMIT = 32000;
+
+function excelCell(value) {
+  const text = String(value ?? '');
+  if (text.length <= EXCEL_CELL_LIMIT) return text;
+  return text.slice(0, EXCEL_CELL_SAFE_LIMIT) + `\\n... [truncated ${text.length - EXCEL_CELL_SAFE_LIMIT} chars for Excel cell limit]`;
+}
+
+function excelRows(rows) {
+  return rows.map(row => row.map(excelCell));
+}
+
 function joinAffectedInstances(instances, folders) {
   const list = (instances || []).map(item => {
     const service = String(item.service || '-').trim() || '-';
@@ -1393,7 +1406,7 @@ function allInstanceRows() {
 
 function buildSummarySheet() {
   const rows = summaryRows();
-  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const ws = XLSX.utils.aoa_to_sheet(excelRows(rows));
   ws['!cols'] = [38,16,18,14,12,10,10,10,12].map(w => ({ wch: w }));
   applyVulnSheetStyle(ws, rows.length, 9);
   return ws;
@@ -1401,7 +1414,7 @@ function buildSummarySheet() {
 
 function buildByServiceSheet() {
   const rows = byServiceRows();
-  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const ws = XLSX.utils.aoa_to_sheet(excelRows(rows));
   ws['!cols'] = [34,16,14,38,18,24,24,34,50].map(w => ({ wch: w }));
   applyVulnSheetStyle(ws, rows.length, 9);
   applySeverityColors(ws, 2, VULN_SEVERITY_STYLES, 'left');
@@ -1410,7 +1423,7 @@ function buildByServiceSheet() {
 
 function buildAffectedInstancesSheet() {
   const rows = affectedInstanceRowsForExport();
-  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const ws = XLSX.utils.aoa_to_sheet(excelRows(rows));
   ws['!cols'] = [34,16,14,38,18,24,24,34,50].map(w => ({ wch: w }));
   applyVulnSheetStyle(ws, rows.length, 9);
   applySeverityColors(ws, 2, VULN_SEVERITY_STYLES, 'left');
@@ -1564,7 +1577,7 @@ function buildVulnSheet() {
     [0, 5].forEach(col => mergeColumn(merges, start, end, col));
   });
 
-  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const ws = XLSX.utils.aoa_to_sheet(excelRows(rows));
   ws['!cols'] = [38,24,14,18,24,35].map(w=>({wch:w}));
   ws['!rows'] = rowHeights;
   ws['!merges'] = merges;
@@ -1636,7 +1649,7 @@ function buildLicSheet() {
     for (let row = start; row <= end; row++) rowHeights[row] = { hpt: perRowHeight };
   });
 
-  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const ws = XLSX.utils.aoa_to_sheet(excelRows(rows));
   ws['!cols'] = [38, 34, 14, 44, 35].map(w => ({ wch: w }));
   ws['!rows'] = rowHeights;
   ws['!merges'] = merges;
