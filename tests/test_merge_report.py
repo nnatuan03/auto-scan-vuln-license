@@ -1,7 +1,7 @@
 from autoscan.reporting.merge_report import generate_html, group_licenses, group_vulns
 
 
-def test_consolidated_excel_export_includes_service_first_sheets(tmp_path):
+def test_consolidated_excel_export_uses_only_per_service_sheets(tmp_path):
     services_dir = tmp_path / "scan-results"
     services_dir.mkdir()
     service_a = services_dir / "service-a"
@@ -43,13 +43,17 @@ def test_consolidated_excel_export_includes_service_first_sheets(tmp_path):
 
     html = output_html.read_text(encoding="utf-8")
 
-    assert "function buildSummarySheet()" in html
-    assert "function buildByServiceSheet()" in html
-    assert "function buildAffectedInstancesSheet()" in html
-    assert "XLSX.utils.book_append_sheet(wb, buildSummarySheet(), 'Summary');" in html
-    assert "XLSX.utils.book_append_sheet(wb, buildByServiceSheet(), 'By Service');" in html
-    assert "XLSX.utils.book_append_sheet(wb, buildAffectedInstancesSheet(), 'Affected Instances');" in html
-    assert "['Service','Finding Type','Severity','Package','Installed','Fixed','CVE','Target','Title']" in html
+    assert "function appendServiceSheets(wb)" in html
+    assert "function vulnerabilityRowsForService(service)" in html
+    assert "function licenseRowsForService(service)" in html
+    assert "appendServiceSheets(wb);" in html
+    assert "safeSheetName('Vuln_', service, usedNames)" in html
+    assert "safeSheetName('Lic_', service, usedNames)" in html
+    assert "XLSX.utils.book_append_sheet(wb, buildSummarySheet(), 'Summary');" not in html
+    assert "XLSX.utils.book_append_sheet(wb, buildByServiceSheet(), 'By Service');" not in html
+    assert "XLSX.utils.book_append_sheet(wb, buildAffectedInstancesSheet(), 'Affected Instances');" not in html
+    assert "XLSX.utils.book_append_sheet(wb, buildVulnSheet(), 'Vulnerability');" not in html
+    assert "XLSX.utils.book_append_sheet(wb, buildLicSheet(),  'License');" not in html
     assert "function exportExcelFallback()" in html
     assert "if (typeof XLSX === 'undefined')" in html
     assert "consolidated-report.xls" in html

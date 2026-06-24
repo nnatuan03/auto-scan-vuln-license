@@ -1404,6 +1404,101 @@ function allInstanceRows() {
   );
 }
 
+function allServiceNames() {
+  return [...new Set(allInstanceRows().map(row => row.service || '-'))].sort((a,b) => a.localeCompare(b));
+}
+
+function safeSheetName(prefix, service, usedNames) {
+  const cleanService = String(service || 'service')
+    .replace(/[\\/?*\[\]:]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim() || 'service';
+  const cleanPrefix = String(prefix || '').replace(/[\\/?*\[\]:]/g, '-');
+  const baseLimit = Math.max(1, 31 - cleanPrefix.length);
+  let base = (cleanPrefix + cleanService.slice(0, baseLimit)).slice(0, 31);
+  let name = base;
+  let index = 2;
+  while (usedNames.has(name)) {
+    const suffix = `_${index}`;
+    name = (base.slice(0, 31 - suffix.length) + suffix).slice(0, 31);
+    index += 1;
+  }
+  usedNames.add(name);
+  return name;
+}
+
+function vulnerabilityRowsForService(service) {
+  const rows = [['Package','CVE ID','Severity','Installed Version','Fix To','Title']];
+  VULN_DATA.forEach(group => {
+    (group.vulns || []).forEach(vuln => {
+      const instances = vuln.affected_instances && vuln.affected_instances.length
+        ? vuln.affected_instances
+        : (group.folders || ['-']).map(folder => ({ service: folder, version: vuln.version || '-', fixed: vuln.fixed || '-' }));
+      instances
+        .filter(instance => (instance.service || '-') === service)
+        .forEach(instance => rows.push([
+          group.pkg || '-',
+          vuln.cve || '-',
+          vuln.severity || 'UNKNOWN',
+          instance.version || vuln.version || '-',
+          instance.fixed || vuln.fixed || '-',
+          vuln.title || (vuln.titles || []).join('\\n') || '-'
+        ]));
+    });
+  });
+  return rows;
+}
+
+function licenseRowsForService(service) {
+  const rows = [['Package','License','Severity','ITS khuyến nghị đối với multiple license','Target / File','Category']];
+  LIC_DATA.forEach(group => {
+    const lics = group.licenses || group.lics || [];
+    const recommended = lics.length > 1 ? recommendedLicense(lics) : null;
+    const recommendation = recommended ? `Nên chọn ${recommended.license || '-'} (${recommended.severity || 'UNKNOWN'})` : '';
+    lics.forEach(license => {
+      const services = splitLines(license.folder).length ? splitLines(license.folder) : (group.folders || ['-']);
+      const targets = splitLines(license.target);
+      const filepaths = splitLines(license.filepath);
+      services.forEach((itemService, index) => {
+        if ((itemService || '-') !== service) return;
+        rows.push([
+          group.pkg || license.pkg || '-',
+          license.license || '-',
+          license.severity || 'UNKNOWN',
+          recommendation,
+          targets[index] || targets[0] || filepaths[index] || filepaths[0] || '-',
+          license.category || '-'
+        ]);
+      });
+    });
+  });
+  return rows;
+}
+
+function sheetFromRows(rows, widths, severityCol = 2, styles = VULN_SEVERITY_STYLES) {
+  const ws = XLSX.utils.aoa_to_sheet(excelRows(rows));
+  ws['!cols'] = widths.map(w => ({ wch: w }));
+  applyVulnSheetStyle(ws, rows.length, widths.length);
+  applySeverityColors(ws, severityCol, styles, 'left');
+  return ws;
+}
+
+function appendServiceSheets(wb) {
+  const usedNames = new Set();
+  allServiceNames().forEach(service => {
+    XLSX.utils.book_append_sheet(
+      wb,
+      sheetFromRows(vulnerabilityRowsForService(service), [38,24,14,18,24,60], 2, VULN_SEVERITY_STYLES),
+      safeSheetName('Vuln_', service, usedNames)
+    );
+    XLSX.utils.book_append_sheet(
+      wb,
+      sheetFromRows(licenseRowsForService(service), [38,34,14,44,60,18], 2, SEVERITY_STYLES),
+      safeSheetName('Lic_', service, usedNames)
+    );
+  });
+}
+
 function buildSummarySheet() {
   const rows = summaryRows();
   const ws = XLSX.utils.aoa_to_sheet(excelRows(rows));
@@ -1512,14 +1607,16 @@ function worksheetXml(name, rows) {
   return '<Worksheet ss:Name="' + excelXmlEscape(name).slice(0, 31) + '"><Table>' + body + '</Table></Worksheet>';
 }
 
+function serviceSheetsForXml() {
+  const usedNames = new Set();
+  return allServiceNames().flatMap(service => [
+    [safeSheetName('Vuln_', service, usedNames), vulnerabilityRowsForService(service)],
+    [safeSheetName('Lic_', service, usedNames), licenseRowsForService(service)],
+  ]);
+}
+
 function exportExcelFallback() {
-  const sheets = [
-    ['Summary', summaryRows()],
-    ['By Service', byServiceRows()],
-    ['Affected Instances', affectedInstanceRowsForExport()],
-    ['Vulnerability', vulnerabilityRowsForFallback()],
-    ['License', licenseRowsForFallback()],
-  ];
+  const sheets = serviceSheetsForXml();
   const xml = '<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?>'
     + '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">'
     + '<Styles><Style ss:ID="Default" ss:Name="Normal"><Alignment ss:Vertical="Center" ss:WrapText="1"/></Style></Styles>'
@@ -1664,11 +1761,7 @@ function exportExcel() {
     return;
   }
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, buildSummarySheet(), 'Summary');
-  XLSX.utils.book_append_sheet(wb, buildByServiceSheet(), 'By Service');
-  XLSX.utils.book_append_sheet(wb, buildAffectedInstancesSheet(), 'Affected Instances');
-  XLSX.utils.book_append_sheet(wb, buildVulnSheet(), 'Vulnerability');
-  XLSX.utils.book_append_sheet(wb, buildLicSheet(),  'License');
+  appendServiceSheets(wb);
   XLSX.writeFile(wb, 'consolidated-report.xlsx');
 }
 </script>
