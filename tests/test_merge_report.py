@@ -1,4 +1,55 @@
-from autoscan.reporting.merge_report import group_licenses, group_vulns
+from autoscan.reporting.merge_report import generate_html, group_licenses, group_vulns
+
+
+def test_consolidated_excel_export_includes_service_first_sheets(tmp_path):
+    services_dir = tmp_path / "scan-results"
+    services_dir.mkdir()
+    service_a = services_dir / "service-a"
+    service_a.mkdir()
+    (service_a / "report.json").write_text(
+        """
+        {
+          "Results": [
+            {
+              "Target": "pom.xml",
+              "Class": "lang-pkgs",
+              "Vulnerabilities": [
+                {
+                  "PkgName": "lodash",
+                  "InstalledVersion": "4.17.15",
+                  "FixedVersion": "4.17.21",
+                  "VulnerabilityID": "CVE-2021-23337",
+                  "Severity": "HIGH",
+                  "Title": "Command injection"
+                }
+              ],
+              "Licenses": [
+                {
+                  "PkgName": "lodash",
+                  "Name": "MIT",
+                  "Severity": "LOW",
+                  "FilePath": "pkg:npm/lodash@4.17.15"
+                }
+              ]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    output_html = tmp_path / "consolidated-report.html"
+    generate_html(services_dir, output_html)
+
+    html = output_html.read_text(encoding="utf-8")
+
+    assert "function buildSummarySheet()" in html
+    assert "function buildByServiceSheet()" in html
+    assert "function buildAffectedInstancesSheet()" in html
+    assert "XLSX.utils.book_append_sheet(wb, buildSummarySheet(), 'Summary');" in html
+    assert "XLSX.utils.book_append_sheet(wb, buildByServiceSheet(), 'By Service');" in html
+    assert "XLSX.utils.book_append_sheet(wb, buildAffectedInstancesSheet(), 'Affected Instances');" in html
+    assert "['Service','Finding Type','Severity','Package','Installed','Fixed','CVE','Target','Title']" in html
 
 
 def test_group_vulns_preserves_service_version_mapping():

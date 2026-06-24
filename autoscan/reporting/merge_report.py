@@ -1327,6 +1327,114 @@ function joinAffectedInstances(instances, folders) {
   return list.length ? list.join('\\n') : joinLines(folders);
 }
 
+function splitLines(value) {
+  if (Array.isArray(value)) return value.map(v => String(v || '').trim()).filter(Boolean);
+  return String(value || '').split('\\n').map(v => v.trim()).filter(Boolean);
+}
+
+function vulnInstanceRows() {
+  const rows = [];
+  VULN_DATA.forEach(group => {
+    (group.vulns || []).forEach(vuln => {
+      const instances = vuln.affected_instances && vuln.affected_instances.length
+        ? vuln.affected_instances
+        : (group.folders || ['-']).map(service => ({ service, version: vuln.version || '-', fixed: vuln.fixed || '-' }));
+      instances.forEach(instance => {
+        rows.push({
+          service: instance.service || '-',
+          type: 'Vulnerability',
+          severity: vuln.severity || 'UNKNOWN',
+          pkg: group.pkg || '-',
+          installed: instance.version || vuln.version || '-',
+          fixed: instance.fixed || vuln.fixed || '-',
+          cve: vuln.cve || '-',
+          target: '-',
+          title: vuln.title || (vuln.titles || []).join('\\n') || '-'
+        });
+      });
+    });
+  });
+  return rows;
+}
+
+function licenseInstanceRows() {
+  const rows = [];
+  LIC_DATA.forEach(group => {
+    (group.licenses || group.lics || []).forEach(license => {
+      const services = splitLines(license.folder).length ? splitLines(license.folder) : (group.folders || ['-']);
+      const targets = splitLines(license.target);
+      const filepaths = splitLines(license.filepath);
+      services.forEach((service, index) => {
+        rows.push({
+          service: service || '-',
+          type: 'License',
+          severity: license.severity || 'UNKNOWN',
+          pkg: group.pkg || license.pkg || '-',
+          installed: '-',
+          fixed: '-',
+          cve: license.license || '-',
+          target: targets[index] || targets[0] || filepaths[index] || filepaths[0] || '-',
+          title: license.category || '-'
+        });
+      });
+    });
+  });
+  return rows;
+}
+
+function allInstanceRows() {
+  return [...vulnInstanceRows(), ...licenseInstanceRows()].sort((a,b) =>
+    String(a.service || '').localeCompare(String(b.service || ''))
+    || sevRank(a.severity) - sevRank(b.severity)
+    || String(a.pkg || '').localeCompare(String(b.pkg || ''))
+    || String(a.cve || '').localeCompare(String(b.cve || ''))
+  );
+}
+
+function buildSummarySheet() {
+  const serviceMap = new Map();
+  allInstanceRows().forEach(row => {
+    const service = row.service || '-';
+    if (!serviceMap.has(service)) {
+      serviceMap.set(service, { service, total: 0, vulnerability: 0, license: 0, CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, UNKNOWN: 0 });
+    }
+    const item = serviceMap.get(service);
+    const severity = String(row.severity || 'UNKNOWN').toUpperCase();
+    item.total += 1;
+    if (row.type === 'Vulnerability') item.vulnerability += 1;
+    if (row.type === 'License') item.license += 1;
+    item[severity] = (item[severity] || 0) + 1;
+  });
+  const rows = [['Service','Total Findings','Vulnerabilities','Licenses','Critical','High','Medium','Low','Unknown']];
+  [...serviceMap.values()]
+    .sort((a,b) => b.CRITICAL - a.CRITICAL || b.HIGH - a.HIGH || b.MEDIUM - a.MEDIUM || b.total - a.total || a.service.localeCompare(b.service))
+    .forEach(item => rows.push([item.service, item.total, item.vulnerability, item.license, item.CRITICAL, item.HIGH, item.MEDIUM, item.LOW, item.UNKNOWN]));
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [38,16,18,14,12,10,10,10,12].map(w => ({ wch: w }));
+  applyVulnSheetStyle(ws, rows.length, 9);
+  return ws;
+}
+
+function buildByServiceSheet() {
+  const rows = [['Service','Finding Type','Severity','Package','Installed','Fixed','CVE / License','Target / File','Title / Category']];
+  allInstanceRows().forEach(row => rows.push([row.service, row.type, row.severity, row.pkg, row.installed, row.fixed, row.cve, row.target, row.title]));
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [34,16,14,38,18,24,24,34,50].map(w => ({ wch: w }));
+  applyVulnSheetStyle(ws, rows.length, 9);
+  applySeverityColors(ws, 2, VULN_SEVERITY_STYLES, 'left');
+  return ws;
+}
+
+function buildAffectedInstancesSheet() {
+  const rows = [['Service','Finding Type','Severity','Package','Installed','Fixed','CVE','Target','Title']];
+  vulnInstanceRows().forEach(row => rows.push([row.service, row.type, row.severity, row.pkg, row.installed, row.fixed, row.cve, row.target, row.title]));
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [34,16,14,38,18,24,24,34,50].map(w => ({ wch: w }));
+  applyVulnSheetStyle(ws, rows.length, 9);
+  applySeverityColors(ws, 2, VULN_SEVERITY_STYLES, 'left');
+  return ws;
+}
+
 function buildVulnSheet() {
   const rows = [['Package','CVE ID','Severity','Installed Version','Fix To','Affected Services / Versions']];
   const merges = [];
@@ -1451,6 +1559,9 @@ function buildLicSheet() {
 
 function exportExcel() {
   const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, buildSummarySheet(), 'Summary');
+  XLSX.utils.book_append_sheet(wb, buildByServiceSheet(), 'By Service');
+  XLSX.utils.book_append_sheet(wb, buildAffectedInstancesSheet(), 'Affected Instances');
   XLSX.utils.book_append_sheet(wb, buildVulnSheet(), 'Vulnerability');
   XLSX.utils.book_append_sheet(wb, buildLicSheet(),  'License');
   XLSX.writeFile(wb, 'consolidated-report.xlsx');
