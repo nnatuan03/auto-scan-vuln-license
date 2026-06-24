@@ -50,6 +50,9 @@ def test_consolidated_excel_export_includes_service_first_sheets(tmp_path):
     assert "XLSX.utils.book_append_sheet(wb, buildByServiceSheet(), 'By Service');" in html
     assert "XLSX.utils.book_append_sheet(wb, buildAffectedInstancesSheet(), 'Affected Instances');" in html
     assert "['Service','Finding Type','Severity','Package','Installed','Fixed','CVE','Target','Title']" in html
+    assert "function exportExcelFallback()" in html
+    assert "if (typeof XLSX === 'undefined')" in html
+    assert "consolidated-report.xls" in html
 
 
 def test_group_vulns_preserves_service_version_mapping():
