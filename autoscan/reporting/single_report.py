@@ -411,10 +411,6 @@ def generate_html(report_path="report.json", output_path="report.html"):
         ]
         severity_lines = [sev_chip(cv["severity"]) for cv in cves]
         fixed_lines = [cv["fixed"] or "-" for cv in cves]
-        title_lines = [
-            cv["title"][:120] + ("..." if len(cv["title"]) > 120 else "")
-            for cv in cves
-        ]
         severity_attr = ",".join(unique_values(cv["severity"] for cv in cves))
         vuln_summary_rows += f"""
         <tr class="data-row pkg-row" data-idx="{i}" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}" data-sev-order="{sev_order}">
@@ -424,9 +420,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
             <td data-value="{sev_order}">{html_line_stack(severity_lines)}</td>
             <td>{line_stack(fixed_lines)}</td>
             <td>{breakdown_bar(g['sev_counts'])}</td>
-            <td style="color:#4a5568;font-size:12px;max-width:420px">{line_stack(title_lines)}</td>
             <td><span class="count-pill">{g['cve_count']}</span></td>
-            <td class="dim-text">{escape(g['target'])}</td>
         </tr>"""
 
     # ── VULN DETAIL ROWS ──
@@ -441,7 +435,6 @@ def generate_html(report_path="report.json", output_path="report.html"):
             ]
             severity_lines = [sev_chip(cv["severity"]) for cv in cves]
             fixed_lines = [cv["fixed"] or "-" for cv in cves]
-            title_lines = [cv["title"] for cv in cves]
             severity_attr = ",".join(unique_values(cv["severity"] for cv in cves))
             rows += f"""<tr class="data-row" data-count="{len(cves)}" data-severity="{g['highest_severity']}" data-severities="{escape(severity_attr)}">
                 <td class="pkg-name">{escape(g['pkg'])}</td>
@@ -449,8 +442,6 @@ def generate_html(report_path="report.json", output_path="report.html"):
                 <td>{html_line_stack(cve_links)}</td>
                 <td data-value="{sev_order}">{html_line_stack(severity_lines)}</td>
                 <td>{line_stack(fixed_lines)}</td>
-                <td style="color:#4a5568;max-width:420px">{line_stack(title_lines)}</td>
-                <td class="dim-text">{escape(g['target'])}</td>
             </tr>"""
         return rows
 
@@ -469,7 +460,6 @@ def generate_html(report_path="report.json", output_path="report.html"):
             <td style="max-width:280px">{html_line_stack(lic_lines)}</td>
             <td data-value="{sev_order}">{html_line_stack(severity_lines)}</td>
             <td><span class="count-pill">{g['lic_count']}</span></td>
-            <td class="dim-text">{target_html}</td>
         </tr>"""
 
     # ── LICENSE DETAIL ROWS ──
@@ -486,8 +476,7 @@ def generate_html(report_path="report.json", output_path="report.html"):
                 <td class="pkg-name">{escape(g['pkg'])}</td>
                 <td>{html_line_stack(lic_lines)}</td>
                 <td data-value="{sev_order}">{html_line_stack(severity_lines)}</td>
-                <td class="dim-text">{target_html}</td>
-            </tr>"""
+                </tr>"""
         return rows
 
     # ── METRICS ──
@@ -1304,12 +1293,10 @@ def generate_html(report_path="report.json", output_path="report.html"):
           <th onclick="sortTable('vsTable',3)">Severity <span class="si">⇅</span></th>
           <th onclick="sortTable('vsTable',4)">Fix To <span class="si">⇅</span></th>
           <th>Breakdown</th>
-          <th>Title</th>
-          <th onclick="sortTable('vsTable',7)">CVE Count <span class="si">⇅</span></th>
-          <th>Target</th>
+          <th onclick="sortTable('vsTable',6)">CVE Count <span class="si">⇅</span></th>
         </tr></thead>
         <tbody id="vsBody">
-          {vuln_summary_rows or '<tr><td colspan="9" class="no-data">No vulnerabilities found.</td></tr>'}
+          {vuln_summary_rows or '<tr><td colspan="7" class="no-data">No vulnerabilities found.</td></tr>'}
         </tbody>
       </table>
       </div>
@@ -1343,11 +1330,9 @@ def generate_html(report_path="report.json", output_path="report.html"):
           <th onclick="sortTable('vdTable',2)">CVE ID <span class="si">⇅</span></th>
           <th onclick="sortTable('vdTable',3)">Severity <span class="si">⇅</span></th>
           <th onclick="sortTable('vdTable',4)">Fixed In <span class="si">⇅</span></th>
-          <th onclick="sortTable('vdTable',5)">Title <span class="si">⇅</span></th>
-          <th>Target</th>
         </tr></thead>
         <tbody id="vdBody">
-          {vuln_detail_rows() or '<tr><td colspan="7" class="no-data">No CVEs found.</td></tr>'}
+          {vuln_detail_rows() or '<tr><td colspan="5" class="no-data">No CVEs found.</td></tr>'}
         </tbody>
       </table>
       </div>
@@ -1388,10 +1373,9 @@ def generate_html(report_path="report.json", output_path="report.html"):
           <th>Licenses</th>
           <th onclick="sortTable('lsTable',2)">Severity <span class="si">⇅</span></th>
           <th onclick="sortTable('lsTable',3)">Count <span class="si">⇅</span></th>
-          <th>Target</th>
         </tr></thead>
         <tbody id="lsBody">
-          {lic_summary_rows or '<tr><td colspan="5" class="no-data">No license issues found.</td></tr>'}
+          {lic_summary_rows or '<tr><td colspan="4" class="no-data">No license issues found.</td></tr>'}
         </tbody>
       </table>
       </div>
@@ -1423,10 +1407,9 @@ def generate_html(report_path="report.json", output_path="report.html"):
           <th onclick="sortTable('ldTable',0)">Package <span class="si">⇅</span></th>
           <th onclick="sortTable('ldTable',1)">License <span class="si">⇅</span></th>
           <th onclick="sortTable('ldTable',2)">Severity <span class="si">⇅</span></th>
-          <th onclick="sortTable('ldTable',3)">Target <span class="si">⇅</span></th>
         </tr></thead>
         <tbody id="ldBody">
-          {lic_detail_rows() or '<tr><td colspan="4" class="no-data">No license issues found.</td></tr>'}
+          {lic_detail_rows() or '<tr><td colspan="3" class="no-data">No license issues found.</td></tr>'}
         </tbody>
       </table>
       </div>
@@ -1670,7 +1653,7 @@ function mergeColumn(merges, startRow, endRow, col) {{
 }}
 
 function buildVulnSheet() {{
-  const rows=[['Package','Installed Version','CVE ID','Severity','Fixed Version','Title','Target']];
+  const rows=[['Package','Installed Version','CVE ID','Severity','Fixed Version']];
 
   PKG_GROUPS.forEach(g=>{{
     const cves=[...g.cves].sort((a,b)=>sevRank(a.severity)-sevRank(b.severity));
@@ -1679,21 +1662,19 @@ function buildVulnSheet() {{
       g.version,
       cves.map(cv=>cv.cve).join('\\n'),
       cves.map(cv=>cv.severity).join('\\n'),
-      cves.map(cv=>cv.fixed || '-').join('\\n'),
-      cves.map(cv=>cv.title || '-').join('\\n'),
-      g.target
+      cves.map(cv=>cv.fixed || '-').join('\\n')
     ]);
   }});
 
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[40,16,24,14,24,60,35].map(w=>{{return{{wch:w}}}});
-  applyMergesAndStyle(ws, [], rows[0], 7);
+  ws['!cols']=[40,16,24,14,24].map(w=>{{return{{wch:w}}}});
+  applyMergesAndStyle(ws, [], rows[0], 5);
   applySeverityColors(ws, 3);
   return ws;
 }}
 
 function buildLicSheet() {{
-  const rows=[['Package','License','Severity','ITS khuyến nghị đối với multiple license','Target']];
+  const rows=[['Package','License','Severity','ITS khuyến nghị đối với multiple license']];
   const merges = [];
   const rowHeights = [{{ hpt: 20 }}];
 
@@ -1702,11 +1683,9 @@ function buildLicSheet() {{
       sevRank(a.severity)-sevRank(b.severity)
       || String(a.license || '').localeCompare(String(b.license || ''))
     );
-    const targets = g.targets && g.targets.length ? g.targets : [g.target || '-'];
-
     if(lics.length === 0) {{
       const rowIndex = rows.length;
-      rows.push([g.pkg, '-', '-', '', joinLines(targets)]);
+      rows.push([g.pkg, '-', '-', '']);
       rowHeights[rowIndex] = {{ hpt: 24 }};
       return;
     }}
@@ -1719,13 +1698,12 @@ function buildLicSheet() {{
         idx === 0 ? g.pkg : '',
         lc.license || '-',
         lc.severity || 'UNKNOWN',
-        idx === 0 ? recommendation : '',
-        idx === 0 ? joinLines(targets) : ''
+        idx === 0 ? recommendation : ''
       ]);
     }});
 
     const end = rows.length - 1;
-    [0,3,4].forEach(col=>mergeColumn(merges,start,end,col));
+    [0,3].forEach(col=>mergeColumn(merges,start,end,col));
 
     let runStart = start;
     let runSeverity = rows[start][2];
@@ -1744,17 +1722,16 @@ function buildLicSheet() {{
       1,
       ...lics.map(lc => Math.max(
         String(lc.license || '').split('\\n').length
-      )),
-      targets.length
+      ))
     );
     const perRowHeight = Math.max(16, Math.min(409.5, Math.ceil((maxLines * 16) / lics.length)));
     for(let row = start; row <= end; row++) rowHeights[row] = {{ hpt: perRowHeight }};
   }});
 
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[40,34,14,44,35].map(w=>{{return{{wch:w}}}});
+  ws['!cols']=[40,34,14,44].map(w=>{{return{{wch:w}}}});
   ws['!rows']=rowHeights;
-  applyMergesAndStyle(ws, merges, rows[0], 5);
+  applyMergesAndStyle(ws, merges, rows[0], 4);
   applySeverityColors(ws, 2);
   return ws;
 }}
@@ -1827,7 +1804,13 @@ function exportExcel() {{
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, buildOverviewSheet(), 'Overview');
   XLSX.utils.book_append_sheet(wb, buildVulnSheet(), 'Vulnerability');
+  wb.Workbook = wb.Workbook || {{}};
+  wb.Workbook.Sheets = wb.Workbook.Sheets || [];
+  wb.Workbook.Sheets[1] = wb.Workbook.Sheets[1] || {{}};
+  wb.Workbook.Sheets[1].TabColor = {{ rgb: '00B050' }};
   XLSX.utils.book_append_sheet(wb, buildLicSheet(),  'License');
+  wb.Workbook.Sheets[2] = wb.Workbook.Sheets[2] || {{}};
+  wb.Workbook.Sheets[2].TabColor = {{ rgb: 'FFD966' }};
   XLSX.writeFile(wb, 'trivy-report.xlsx');
 }}
 </script>

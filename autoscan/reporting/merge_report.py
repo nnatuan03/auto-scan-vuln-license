@@ -1428,7 +1428,7 @@ function safeSheetName(prefix, service, usedNames) {
 }
 
 function vulnerabilityRowsForService(service) {
-  const rows = [['Package','CVE ID','Severity','Installed Version','Fix To','Title']];
+  const rows = [['Package','CVE ID','Severity','Installed Version','Fix To']];
   VULN_DATA.forEach(group => {
     (group.vulns || []).forEach(vuln => {
       const instances = vuln.affected_instances && vuln.affected_instances.length
@@ -1450,7 +1450,7 @@ function vulnerabilityRowsForService(service) {
 }
 
 function licenseRowsForService(service) {
-  const rows = [['Package','License','Severity','ITS khuyến nghị đối với multiple license','Target / File','Category']];
+  const rows = [['Package','License','Severity','ITS khuyến nghị đối với multiple license']];
   LIC_DATA.forEach(group => {
     const lics = group.licenses || group.lics || [];
     const recommended = lics.length > 1 ? recommendedLicense(lics) : null;
@@ -1465,9 +1465,7 @@ function licenseRowsForService(service) {
           group.pkg || license.pkg || '-',
           license.license || '-',
           license.severity || 'UNKNOWN',
-          recommendation,
-          targets[index] || targets[0] || filepaths[index] || filepaths[0] || '-',
-          license.category || '-'
+          recommendation
         ]);
       });
     });
@@ -1483,19 +1481,33 @@ function sheetFromRows(rows, widths, severityCol = 2, styles = VULN_SEVERITY_STY
   return ws;
 }
 
+function setSheetTabColor(wb, sheetName, rgb) {
+  const index = wb.SheetNames.indexOf(sheetName);
+  if (index < 0) return;
+  wb.Workbook = wb.Workbook || {};
+  wb.Workbook.Sheets = wb.Workbook.Sheets || [];
+  wb.Workbook.Sheets[index] = wb.Workbook.Sheets[index] || {};
+  wb.Workbook.Sheets[index].TabColor = { rgb };
+}
+
 function appendServiceSheets(wb) {
   const usedNames = new Set();
   allServiceNames().forEach(service => {
+    const vulnSheetName = safeSheetName('Vuln_', service, usedNames);
     XLSX.utils.book_append_sheet(
       wb,
-      sheetFromRows(vulnerabilityRowsForService(service), [38,24,14,18,24,60], 2, VULN_SEVERITY_STYLES),
-      safeSheetName('Vuln_', service, usedNames)
+      sheetFromRows(vulnerabilityRowsForService(service), [38,24,14,18,24], 2, VULN_SEVERITY_STYLES),
+      vulnSheetName
     );
+    setSheetTabColor(wb, vulnSheetName, '00B050');
+
+    const licenseSheetName = safeSheetName('Lic_', service, usedNames);
     XLSX.utils.book_append_sheet(
       wb,
-      sheetFromRows(licenseRowsForService(service), [38,34,14,44,60,18], 2, SEVERITY_STYLES),
-      safeSheetName('Lic_', service, usedNames)
+      sheetFromRows(licenseRowsForService(service), [38,34,14,44], 2, SEVERITY_STYLES),
+      licenseSheetName
     );
+    setSheetTabColor(wb, licenseSheetName, 'FFD966');
   });
 }
 
@@ -1510,8 +1522,8 @@ function buildSummarySheet() {
 function buildByServiceSheet() {
   const rows = byServiceRows();
   const ws = XLSX.utils.aoa_to_sheet(excelRows(rows));
-  ws['!cols'] = [34,16,14,38,18,24,24,34,50].map(w => ({ wch: w }));
-  applyVulnSheetStyle(ws, rows.length, 9);
+  ws['!cols'] = [34,16,14,38,18,24,24].map(w => ({ wch: w }));
+  applyVulnSheetStyle(ws, rows.length, 7);
   applySeverityColors(ws, 2, VULN_SEVERITY_STYLES, 'left');
   return ws;
 }
@@ -1519,8 +1531,8 @@ function buildByServiceSheet() {
 function buildAffectedInstancesSheet() {
   const rows = affectedInstanceRowsForExport();
   const ws = XLSX.utils.aoa_to_sheet(excelRows(rows));
-  ws['!cols'] = [34,16,14,38,18,24,24,34,50].map(w => ({ wch: w }));
-  applyVulnSheetStyle(ws, rows.length, 9);
+  ws['!cols'] = [34,16,14,38,18,24,24].map(w => ({ wch: w }));
+  applyVulnSheetStyle(ws, rows.length, 7);
   applySeverityColors(ws, 2, VULN_SEVERITY_STYLES, 'left');
   return ws;
 }
@@ -1547,14 +1559,14 @@ function summaryRows() {
 }
 
 function byServiceRows() {
-  const rows = [['Service','Finding Type','Severity','Package','Installed','Fixed','CVE / License','Target / File','Title / Category']];
-  allInstanceRows().forEach(row => rows.push([row.service, row.type, row.severity, row.pkg, row.installed, row.fixed, row.cve, row.target, row.title]));
+  const rows = [['Service','Finding Type','Severity','Package','Installed','Fixed','CVE / License']];
+  allInstanceRows().forEach(row => rows.push([row.service, row.type, row.severity, row.pkg, row.installed, row.fixed, row.cve]));
   return rows;
 }
 
 function affectedInstanceRowsForExport() {
-  const rows = [['Service','Finding Type','Severity','Package','Installed','Fixed','CVE','Target','Title']];
-  vulnInstanceRows().forEach(row => rows.push([row.service, row.type, row.severity, row.pkg, row.installed, row.fixed, row.cve, row.target, row.title]));
+  const rows = [['Service','Finding Type','Severity','Package','Installed','Fixed','CVE']];
+  vulnInstanceRows().forEach(row => rows.push([row.service, row.type, row.severity, row.pkg, row.installed, row.fixed, row.cve]));
   return rows;
 }
 
